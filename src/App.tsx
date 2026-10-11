@@ -24,9 +24,9 @@ function Rules({ compact = false }: { compact?: boolean }) {
     <section className={`rules ${compact ? "compact" : ""}`}>
       <h2>Cabin crew briefing</h2>
       <div className="rule-grid">
-        <div><b>1</b><span>Grab drinks, chips, and the correct meal from the galleys.</span></div>
+        <div><b>1</b><span>Load up to three drinks, snacks, meals, or trash on your tray.</span></div>
         <div><b>2</b><span>Match every item in a passenger’s order before time runs out.</span></div>
-        <div><b>3</b><span>Pick up their trash, then take it to the bin at the front.</span></div>
+        <div><b>3</b><span>Select aisle or window to collect their trash, then take it to the front bin.</span></div>
         <div><b>!</b><span>Wrong or duplicate items cost 50 points. Don’t block the aisle!</span></div>
       </div>
       {!compact && (
@@ -328,7 +328,7 @@ export default function App() {
   }
 
   return (
-    <main className="game">
+    <main className={`game ${room.status === "finished" ? "finished" : ""}`}>
       <GameScene
         room={room}
         playerId={playerId}
@@ -359,7 +359,7 @@ export default function App() {
         ))}
       </aside>
       <div className="service-picker">
-        <small>SERVE WHICH SEAT?</small>
+        <small>TARGET WHICH SEAT?</small>
         <div className="seat-toggle">
           <button
             className={seatPreference === "aisle" ? "active" : ""}

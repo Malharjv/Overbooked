@@ -10,7 +10,10 @@ const ROUND_SECONDS = 180;
 const ITEM_POINTS = 75;
 const COMPLETE_BONUS = 100;
 const MAX_OPEN_ORDERS = 5;
-const COLORS = ["#ff5d73", "#32c8b2", "#ffb547", "#8c7cff"];
+const INVENTORY_CAPACITY = 3;
+const TRASH_DELAY_MS = 6000;
+const COLORS = ["#243b6b", "#c94755", "#858d9b", "#e45b9d"];
+const AVATARS = ["female", "male", "female", "male"];
 const EXTRAS = ["water", "soda", "chips"];
 const MEALS = ["meat", "fish", "veg"];
 const PICKUPS = {
@@ -61,6 +64,7 @@ function createRoom(code) {
     interval: null,
     orderInterval: null,
     pendingOrders: 0,
+    pendingTrash: new Set(),
     roundId: 0,
   };
   rooms.set(code, room);
@@ -69,7 +73,11 @@ function createRoom(code) {
 
 function makeOrder(room) {
   if (room.orders.length >= MAX_OPEN_ORDERS) return;
-  const occupied = new Set(room.orders.map((order) => order.seatId));
+  const occupied = new Set([
+    ...room.orders.map((order) => order.seatId),
+    ...room.messes.map((mess) => mess.seatId),
+    ...room.pendingTrash,
+  ]);
   const available = Array.from({ length: 32 }, (_, i) => i).filter(
     (seatId) => !occupied.has(seatId),
   );
@@ -109,6 +117,29 @@ function queueOrder(room, delay = 2400) {
   }, delay);
 }
 
+function queueTrash(room, seatId) {
+  const roundId = room.roundId;
+  room.pendingTrash.add(seatId);
+  setTimeout(() => {
+    if (room.roundId !== roundId) return;
+    room.pendingTrash.delete(seatId);
+    if (room.status !== "playing") return;
+
+    const seat = seatPosition(seatId);
+    const column = seatId % 4;
+    const isWindow = column === 0 || column === 3;
+    const visualSeatX = [-2, -1.05, 1.05, 2][column];
+    room.messes.push({
+      id: nanoid(7),
+      seatId,
+      x: isWindow ? visualSeatX : Math.sign(seat.x) * 0.67,
+      pickupX: Math.sign(seat.x) * 0.67,
+      z: seat.z,
+    });
+    emitRoom(room);
+  }, TRASH_DELAY_MS);
+}
+
 function startRound(room) {
   if (room.status === "playing") return;
   room.status = "playing";
@@ -117,12 +148,13 @@ function startRound(room) {
   room.orders = [];
   room.messes = [];
   room.pendingOrders = 0;
+  room.pendingTrash = new Set();
   room.roundId += 1;
   let spawnIndex = 0;
   for (const player of room.players.values()) {
     player.x = 0;
     player.z = 8.1 - spawnIndex * 0.55;
-    player.held = null;
+    player.held = [];
     player.squeezing = false;
     spawnIndex += 1;
   }
@@ -208,57 +240,85 @@ io.on("connection", (socket) => {
     const player = room?.players.get(socket.data.playerId);
     if (!room || !player || room.status !== "playing") return;
 
-    if (!player.held) {
-      const pickup = Object.entries(PICKUPS).find(([, point]) => distance(player, point) < 1.3);
-      if (pickup) player.held = { type: "item", item: pickup[0] };
-      else {
-        const mess = room.messes.find((entry) => distance(player, entry) < 1.25);
-        if (mess) {
-          player.held = { type: "trash", item: "trash" };
-          room.messes = room.messes.filter((entry) => entry.id !== mess.id);
-        }
-      }
-    } else if (
-      player.held.type === "trash" &&
-      player.z > 7.1
-    ) {
-      player.held = null;
-      room.score += 25;
-    } else if (player.held.type === "item") {
-      const nearby = room.orders
-        .filter((order) => {
-          const column = order.seatId % 4;
-          const seatType = column === 0 || column === 3 ? "window" : "aisle";
-          return (
-            seatType === seatPreference &&
-            Math.abs(player.z - seatPosition(order.seatId).z) < 0.9
-          );
-        })
-        .sort((a, b) => {
-          const seatA = seatPosition(a.seatId);
-          const seatB = seatPosition(b.seatId);
-          const distanceA = Math.abs(player.x - Math.sign(seatA.x) * 0.15);
-          const distanceB = Math.abs(player.x - Math.sign(seatB.x) * 0.15);
-          return distanceA - distanceB;
-        })[0];
-      if (nearby) {
-        if (nearby.served.includes(player.held.item)) {
-          room.score = Math.max(0, room.score - 50);
-        } else if (nearby.items.includes(player.held.item)) {
-          nearby.served.push(player.held.item);
+    // Normalize rooms created by an older server process during local development.
+    if (!Array.isArray(player.held)) player.held = player.held ? [player.held] : [];
+
+    const trashCount = player.held.filter((entry) => entry.type === "trash").length;
+    if (trashCount && player.z > 7.1) {
+      player.held = player.held.filter((entry) => entry.type !== "trash");
+      room.score += trashCount * 25;
+      emitRoom(room);
+      return;
+    }
+
+    const nearbyMess = room.messes
+      .filter((entry) => {
+        const column = entry.seatId % 4;
+        const seatType = column === 0 || column === 3 ? "window" : "aisle";
+        return seatType === seatPreference && Math.abs(player.z - entry.z) < 0.9;
+      })
+      .sort(
+        (a, b) =>
+          Math.abs(player.x - (a.pickupX ?? a.x)) -
+          Math.abs(player.x - (b.pickupX ?? b.x)),
+      )[0];
+
+    if (nearbyMess && player.held.length < INVENTORY_CAPACITY) {
+      player.held.push({ type: "trash", item: "trash" });
+      room.messes = room.messes.filter((entry) => entry.id !== nearbyMess.id);
+      emitRoom(room);
+      return;
+    }
+
+    const nearby = room.orders
+      .filter((order) => {
+        const column = order.seatId % 4;
+        const seatType = column === 0 || column === 3 ? "window" : "aisle";
+        return (
+          seatType === seatPreference &&
+          Math.abs(player.z - seatPosition(order.seatId).z) < 0.9
+        );
+      })
+      .sort((a, b) => {
+        const seatA = seatPosition(a.seatId);
+        const seatB = seatPosition(b.seatId);
+        const distanceA = Math.abs(player.x - Math.sign(seatA.x) * 0.15);
+        const distanceB = Math.abs(player.x - Math.sign(seatB.x) * 0.15);
+        return distanceA - distanceB;
+      })[0];
+
+    let acted = false;
+    if (nearby) {
+      const neededIndex = player.held.findIndex(
+        (entry) =>
+          entry.type === "item" &&
+          nearby.items.includes(entry.item) &&
+          !nearby.served.includes(entry.item),
+      );
+      const fallbackIndex = player.held.findIndex((entry) => entry.type === "item");
+      const itemIndex = neededIndex >= 0 ? neededIndex : fallbackIndex;
+
+      if (itemIndex >= 0) {
+        const [servedItem] = player.held.splice(itemIndex, 1);
+        acted = true;
+        if (neededIndex >= 0) {
+          nearby.served.push(servedItem.item);
           room.score += ITEM_POINTS;
           if (nearby.served.length === nearby.items.length) {
             room.score += COMPLETE_BONUS;
-            const seat = seatPosition(nearby.seatId);
-            room.messes.push({ id: nanoid(7), x: Math.sign(seat.x) * 0.67, z: seat.z });
+            queueTrash(room, nearby.seatId);
             room.orders = room.orders.filter((order) => order.id !== nearby.id);
             queueOrder(room);
           }
         } else {
           room.score = Math.max(0, room.score - 50);
         }
-        player.held = null;
       }
+    }
+
+    if (!acted && player.held.length < INVENTORY_CAPACITY) {
+      const pickup = Object.entries(PICKUPS).find(([, point]) => distance(player, point) < 1.3);
+      if (pickup) player.held.push({ type: "item", item: pickup[0] });
     }
     emitRoom(room);
   });
@@ -285,11 +345,12 @@ function joinRoom(socket, room, rawName, callback) {
     id: playerId,
     name: String(rawName || "Crewmate").trim().slice(0, 14),
     color: COLORS[room.players.size],
+    avatar: AVATARS[room.players.size],
     x: 0,
     z: 8.1 - room.players.size * 0.55,
     facing: Math.PI,
     squeezing: false,
-    held: null,
+    held: [],
   };
   room.players.set(playerId, player);
   if (!room.hostId) room.hostId = playerId;

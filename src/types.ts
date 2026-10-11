@@ -9,11 +9,12 @@ export interface Player {
   id: string;
   name: string;
   color: string;
+  avatar: "female" | "male";
   x: number;
   z: number;
   facing: number;
   squeezing: boolean;
-  held: HeldItem | null;
+  held: HeldItem[];
 }
 
 export interface Order {
@@ -26,7 +27,9 @@ export interface Order {
 
 export interface Mess {
   id: string;
+  seatId: number;
   x: number;
+  pickupX: number;
   z: number;
 }
 

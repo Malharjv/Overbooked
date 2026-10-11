@@ -272,9 +272,9 @@ function CrewMember({
   });
 
   return (
-    <group ref={group} position={[player.x, 0, player.z]} rotation-y={player.facing}>
+    <group ref={group} position={[player.x, 0.24, player.z]} rotation-y={player.facing}>
       {isLocal && (
-        <mesh position={[0, 0.025, 0]} rotation-x={-Math.PI / 2}>
+        <mesh position={[0, 0.04, 0]} rotation-x={-Math.PI / 2}>
           <ringGeometry args={[0.32, 0.43, 20]} />
           <meshBasicMaterial color="#ffe45d" />
         </mesh>
@@ -291,10 +291,21 @@ function CrewMember({
         <RoundedBox args={[0.55, 0.66, 0.36]} radius={0.14} smoothness={3} position={[0, 0.72, 0]} castShadow>
           <meshStandardMaterial color={player.color} roughness={0.55} />
         </RoundedBox>
-        <mesh position={[0, 0.48, 0]} castShadow>
-          <cylinderGeometry args={[0.24, 0.34, 0.38, 12]} />
-          <meshStandardMaterial color={player.color} roughness={0.58} />
-        </mesh>
+        {player.avatar === "female" ? (
+          <mesh position={[0, 0.48, 0]} castShadow>
+            <cylinderGeometry args={[0.24, 0.34, 0.38, 12]} />
+            <meshStandardMaterial color={player.color} roughness={0.58} />
+          </mesh>
+        ) : (
+          <group>
+            <RoundedBox args={[0.24, 0.34, 0.34]} radius={0.05} smoothness={2} position={[-0.13, 0.5, 0]} castShadow>
+              <meshStandardMaterial color={player.color} roughness={0.58} />
+            </RoundedBox>
+            <RoundedBox args={[0.24, 0.34, 0.34]} radius={0.05} smoothness={2} position={[0.13, 0.5, 0]} castShadow>
+              <meshStandardMaterial color={player.color} roughness={0.58} />
+            </RoundedBox>
+          </group>
+        )}
         <RoundedBox args={[0.18, 0.38, 0.035]} radius={0.025} smoothness={2} position={[0, 0.82, 0.2]}>
           <meshStandardMaterial color="#fffaf0" />
         </RoundedBox>
@@ -310,6 +321,18 @@ function CrewMember({
           <boxGeometry args={[0.49, 0.065, 0.035]} />
           <meshStandardMaterial color="#26385f" />
         </mesh>
+        {player.avatar === "male" && (
+          <group position={[0, 0.84, 0.235]}>
+            <mesh rotation-z={Math.PI}>
+              <coneGeometry args={[0.055, 0.24, 4]} />
+              <meshStandardMaterial color="#e84f66" />
+            </mesh>
+            <mesh position={[0, 0.14, 0]}>
+              <sphereGeometry args={[0.055, 8, 6]} />
+              <meshStandardMaterial color="#e84f66" />
+            </mesh>
+          </group>
+        )}
         <mesh ref={leftArm} position={[-0.34, 0.75, 0]} rotation-z={-0.15} castShadow>
           <capsuleGeometry args={[0.07, 0.34, 5, 8]} />
           <meshStandardMaterial color={player.color} />
@@ -326,26 +349,30 @@ function CrewMember({
           <sphereGeometry args={[0.275, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
           <meshStandardMaterial color={["#392a28", "#e2a33d", "#5b382c"][player.id.charCodeAt(0) % 3]} />
         </mesh>
-        <mesh position={[0, 1.2, -0.24]} castShadow>
-          <sphereGeometry args={[0.13, 12, 9]} />
-          <meshStandardMaterial color={["#392a28", "#e2a33d", "#5b382c"][player.id.charCodeAt(0) % 3]} />
-        </mesh>
-        <mesh position={[0, 1.01, 0]} rotation-x={Math.PI / 2}>
-          <torusGeometry args={[0.13, 0.033, 7, 16]} />
-          <meshStandardMaterial color="#e84f66" />
-        </mesh>
-        <mesh position={[0, 1.53, -0.015]} castShadow>
-          <cylinderGeometry args={[0.19, 0.22, 0.1, 16]} />
-          <meshStandardMaterial color={player.color} roughness={0.5} />
-        </mesh>
-        <mesh position={[0, 1.47, 0.08]}>
-          <boxGeometry args={[0.47, 0.035, 0.27]} />
-          <meshStandardMaterial color={player.color} />
-        </mesh>
-        <mesh position={[0, 1.53, 0.185]}>
-          <boxGeometry args={[0.13, 0.035, 0.018]} />
-          <meshStandardMaterial color="#ffe06b" metalness={0.25} />
-        </mesh>
+        {player.avatar === "female" && (
+          <>
+            <mesh position={[0, 1.2, -0.24]} castShadow>
+              <sphereGeometry args={[0.13, 12, 9]} />
+              <meshStandardMaterial color={["#392a28", "#e2a33d", "#5b382c"][player.id.charCodeAt(0) % 3]} />
+            </mesh>
+            <mesh position={[0, 1.01, 0]} rotation-x={Math.PI / 2}>
+              <torusGeometry args={[0.13, 0.033, 7, 16]} />
+              <meshStandardMaterial color="#e84f66" />
+            </mesh>
+            <mesh position={[0, 1.53, -0.015]} castShadow>
+              <cylinderGeometry args={[0.19, 0.22, 0.1, 16]} />
+              <meshStandardMaterial color={player.color} roughness={0.5} />
+            </mesh>
+            <mesh position={[0, 1.47, 0.08]}>
+              <boxGeometry args={[0.47, 0.035, 0.27]} />
+              <meshStandardMaterial color={player.color} />
+            </mesh>
+            <mesh position={[0, 1.53, 0.185]}>
+              <boxGeometry args={[0.13, 0.035, 0.018]} />
+              <meshStandardMaterial color="#ffe06b" metalness={0.25} />
+            </mesh>
+          </>
+        )}
         <mesh position={[-0.095, 1.23, 0.245]}>
           <sphereGeometry args={[0.027, 8, 6]} />
           <meshBasicMaterial color="#1b2340" />
@@ -358,18 +385,28 @@ function CrewMember({
           <boxGeometry args={[0.29, 0.1, 0.035]} />
           <meshStandardMaterial color="#ffe06b" />
         </mesh>
-        {player.held && (
+        {player.held.length > 0 && (
           <group position={[0, 0.9, 0.48]}>
             <mesh position={[0, -0.12, 0]} castShadow>
-              <cylinderGeometry args={[0.32, 0.32, 0.055, 16]} />
+              <cylinderGeometry args={[0.42, 0.42, 0.055, 18]} />
               <meshStandardMaterial color="#dce3ec" metalness={0.5} roughness={0.25} />
             </mesh>
-            <ItemModel item={player.held.item} scale={1.3} />
-            <Html center position={[0, 0.7, 0]}>
+            {player.held.map((heldItem, index) => (
+              <group
+                key={`${heldItem.item}-${index}`}
+                position={[(index - (player.held.length - 1) / 2) * 0.25, 0, 0]}
+              >
+                <ItemModel item={heldItem.item} scale={0.95} />
+              </group>
+            ))}
+            <Html center position={[0, 0.78, 0]}>
               <div className="held-item">
-                <b>HOLDING</b>
-                <ItemIcon item={player.held.item} size={32} />
-                {ITEM_META[player.held.item].label}
+                <b>TRAY {player.held.length}/3</b>
+                <div className="held-items-icons">
+                  {player.held.map((heldItem, index) => (
+                    <ItemIcon item={heldItem.item} size={30} key={`${heldItem.item}-${index}`} />
+                  ))}
+                </div>
               </div>
             </Html>
           </group>
@@ -700,21 +737,32 @@ function Cabin({
         <RoundedBox args={[5.95, 1.05, 0.3]} radius={0.12} smoothness={3} position={[0, 0.65, -9.05]}>
           <meshStandardMaterial color="#f4f7fa" />
         </RoundedBox>
-        <RoundedBox args={[1.1, 0.07, 17.5]} radius={0.035} smoothness={2} position={[0, 0.24, 0]}>
-          <meshStandardMaterial color="#1e326b" roughness={0.96} />
+        <RoundedBox args={[1.1, 0.07, 17.5]} radius={0.035} smoothness={2} position={[0, 0.26, 0]}>
+          <meshStandardMaterial
+            color="#1e326b"
+            roughness={0.96}
+            polygonOffset
+            polygonOffsetFactor={-1}
+            polygonOffsetUnits={-1}
+          />
         </RoundedBox>
-        <mesh position={[-0.58, 0.275, 0]}>
+        <mesh position={[-0.58, 0.31, 0]}>
           <boxGeometry args={[0.035, 0.025, 17.3]} />
           <meshStandardMaterial color="#d5af4d" />
         </mesh>
-        <mesh position={[0.58, 0.275, 0]}>
+        <mesh position={[0.58, 0.31, 0]}>
           <boxGeometry args={[0.035, 0.025, 17.3]} />
           <meshStandardMaterial color="#d5af4d" />
         </mesh>
         {Array.from({ length: 8 }, (_, row) => (
-          <mesh key={`stripe-${row}`} position={[0, 0.28, 5.25 - row * 1.5]} rotation-x={-Math.PI / 2}>
+          <mesh key={`stripe-${row}`} position={[0, 0.307, 5.25 - row * 1.5]} rotation-x={-Math.PI / 2}>
             <planeGeometry args={[1.08, 0.035]} />
-            <meshBasicMaterial color="#5570aa" />
+            <meshBasicMaterial
+              color="#5570aa"
+              polygonOffset
+              polygonOffsetFactor={-2}
+              polygonOffsetUnits={-2}
+            />
           </mesh>
         ))}
         {Array.from({ length: 32 }, (_, seatId) => (
@@ -727,22 +775,37 @@ function Cabin({
         <Supply item="fish" label="FISH" position={[1.25, 0.55, -7.3]} />
         <Supply item="veg" label="VEG" position={[1.25, 0.55, -8.25]} />
         <group position={[0, 0.25, 8.65]}>
-          <mesh>
-            <cylinderGeometry args={[0.4, 0.34, 0.55, 12]} />
+          <mesh castShadow>
+            <cylinderGeometry args={[0.48, 0.42, 0.72, 16]} />
+            <meshStandardMaterial color="#e84f66" />
+          </mesh>
+          <mesh position={[0, 0.4, 0]}>
+            <cylinderGeometry args={[0.54, 0.54, 0.12, 16]} />
             <meshStandardMaterial color="#273352" />
           </mesh>
-          <Html center position={[0, 0.72, 0]}>
-            <div className="trash-label"><ItemIcon item="trash" size={20} /> TRASH</div>
+          <mesh position={[0, 0.47, 0.05]} rotation-x={-Math.PI / 2}>
+            <circleGeometry args={[0.35, 16]} />
+            <meshStandardMaterial color="#101b35" />
+          </mesh>
+          <Html center position={[0, 0.98, 0]}>
+            <div className="trash-label"><ItemIcon item="trash" size={32} /> TRASH BIN</div>
           </Html>
         </group>
         {room.messes.map((mess) => (
           <group key={mess.id} position={[mess.x, 0.28, mess.z]}>
             <mesh rotation-x={-Math.PI / 2}>
-              <circleGeometry args={[0.3, 12]} />
-              <meshStandardMaterial color="#9a875c" />
+              <circleGeometry args={[0.38, 16]} />
+              <meshStandardMaterial color="#f4cf5e" />
             </mesh>
-            <Html center position={[0, 0.32, 0]}>
-              <div className="mess"><ItemIcon item="trash" size={28} /></div>
+            <mesh position={[0, 0.2, 0]} castShadow>
+              <dodecahedronGeometry args={[0.22, 0]} />
+              <meshStandardMaterial color="#596579" />
+            </mesh>
+            <Html center position={[0, 0.62, 0]}>
+              <div className="mess">
+                <ItemIcon item="trash" size={38} />
+                <b>PICK UP</b>
+              </div>
             </Html>
           </group>
         ))}

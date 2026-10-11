@@ -7,6 +7,7 @@ the three-minute timer expires.
 ## Level 1 rules
 
 - Collect water, soda, chips, and the correct meat, fish, or vegetarian meal.
+- Carry up to three items at once on each steward's tray.
 - Serve every item shown over a passenger before their patience runs out.
 - A completed order leaves trash. Take it to the bin at the front.
 - Correct items earn points; wrong or duplicate service costs 50 points.
