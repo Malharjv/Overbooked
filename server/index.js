@@ -9,8 +9,10 @@ const PORT = process.env.PORT || 3001;
 const ROUND_SECONDS = 180;
 const ITEM_POINTS = 75;
 const COMPLETE_BONUS = 100;
+const MAX_OPEN_ORDERS = 5;
 const COLORS = ["#ff5d73", "#32c8b2", "#ffb547", "#8c7cff"];
-const ITEM_NAMES = ["water", "soda", "chips", "meat", "fish", "veg"];
+const EXTRAS = ["water", "soda", "chips"];
+const MEALS = ["meat", "fish", "veg"];
 const PICKUPS = {
   water: { x: -1.25, z: 7.3 },
   soda: { x: 1.25, z: 7.3 },
@@ -58,29 +60,53 @@ function createRoom(code) {
     messes: [],
     interval: null,
     orderInterval: null,
+    pendingOrders: 0,
+    roundId: 0,
   };
   rooms.set(code, room);
   return room;
 }
 
 function makeOrder(room) {
+  if (room.orders.length >= MAX_OPEN_ORDERS) return;
   const occupied = new Set(room.orders.map((order) => order.seatId));
   const available = Array.from({ length: 32 }, (_, i) => i).filter(
     (seatId) => !occupied.has(seatId),
   );
   if (!available.length) return;
   const seatId = available[Math.floor(Math.random() * available.length)];
-  const itemCount = Math.random() > 0.58 ? 2 : 1;
-  const items = [...ITEM_NAMES]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, itemCount);
+  const itemCount = Math.random() > 0.78 ? 3 : Math.random() > 0.34 ? 2 : 1;
+  const items = [];
+  if (Math.random() < 0.68) {
+    items.push(MEALS[Math.floor(Math.random() * MEALS.length)]);
+  }
+  const shuffledExtras = [...EXTRAS].sort(() => Math.random() - 0.5);
+  for (const extra of shuffledExtras) {
+    if (items.length >= itemCount) break;
+    items.push(extra);
+  }
+  // A one-item order without a meal still gets a valid drink or snack.
+  if (!items.length) items.push(shuffledExtras[0]);
   room.orders.push({
     id: nanoid(7),
     seatId,
     items,
     served: [],
-    expiresAt: Date.now() + 38000,
+    expiresAt: Date.now() + 42000,
   });
+}
+
+function queueOrder(room, delay = 2400) {
+  const roundId = room.roundId;
+  room.pendingOrders += 1;
+  setTimeout(() => {
+    if (room.roundId !== roundId) return;
+    room.pendingOrders = Math.max(0, room.pendingOrders - 1);
+    if (room.status === "playing") {
+      makeOrder(room);
+      emitRoom(room);
+    }
+  }, delay);
 }
 
 function startRound(room) {
@@ -90,6 +116,8 @@ function startRound(room) {
   room.timeLeft = ROUND_SECONDS;
   room.orders = [];
   room.messes = [];
+  room.pendingOrders = 0;
+  room.roundId += 1;
   let spawnIndex = 0;
   for (const player of room.players.values()) {
     player.x = 0;
@@ -100,15 +128,16 @@ function startRound(room) {
   }
   for (let i = 0; i < Math.min(3, room.players.size + 1); i++) makeOrder(room);
   room.orderInterval = setInterval(() => {
-    if (room.orders.length < 6) makeOrder(room);
+    if (room.orders.length + room.pendingOrders < MAX_OPEN_ORDERS) makeOrder(room);
     emitRoom(room);
-  }, 7000);
+  }, 6500);
   room.interval = setInterval(() => {
     room.timeLeft -= 1;
     const expired = room.orders.filter((order) => order.expiresAt <= Date.now());
     if (expired.length) {
       room.score = Math.max(0, room.score - expired.length * 50);
       room.orders = room.orders.filter((order) => order.expiresAt > Date.now());
+      expired.forEach((_, index) => queueOrder(room, 2400 + index * 450));
     }
     if (room.timeLeft <= 0) {
       room.timeLeft = 0;
@@ -191,7 +220,7 @@ io.on("connection", (socket) => {
       }
     } else if (
       player.held.type === "trash" &&
-      (player.z > 7.1 || player.z < -7.1)
+      player.z > 7.1
     ) {
       player.held = null;
       room.score += 25;
@@ -223,12 +252,7 @@ io.on("connection", (socket) => {
             const seat = seatPosition(nearby.seatId);
             room.messes.push({ id: nanoid(7), x: Math.sign(seat.x) * 0.67, z: seat.z });
             room.orders = room.orders.filter((order) => order.id !== nearby.id);
-            setTimeout(() => {
-              if (room.status === "playing") {
-                makeOrder(room);
-                emitRoom(room);
-              }
-            }, 2200);
+            queueOrder(room);
           }
         } else {
           room.score = Math.max(0, room.score - 50);

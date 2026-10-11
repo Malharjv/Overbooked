@@ -26,7 +26,7 @@ function Rules({ compact = false }: { compact?: boolean }) {
       <div className="rule-grid">
         <div><b>1</b><span>Grab drinks, chips, and the correct meal from the galleys.</span></div>
         <div><b>2</b><span>Match every item in a passenger’s order before time runs out.</span></div>
-        <div><b>3</b><span>Pick up their trash, then take it to either end bin.</span></div>
+        <div><b>3</b><span>Pick up their trash, then take it to the bin at the front.</span></div>
         <div><b>!</b><span>Wrong or duplicate items cost 50 points. Don’t block the aisle!</span></div>
       </div>
       {!compact && (
@@ -344,7 +344,10 @@ export default function App() {
       </header>
       <aside className="mini-manifest">
         {room.orders.slice(0, 5).map((order) => (
-          <div key={order.id}>
+          <div
+            key={order.id}
+            className={order.expiresAt - Date.now() <= 3000 ? "expiring" : ""}
+          >
             <b>
               ROW {Math.floor(order.seatId / 4) + 1}
               <small>{order.seatId % 4 === 0 || order.seatId % 4 === 3 ? "WINDOW" : "AISLE"}</small>

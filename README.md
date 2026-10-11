@@ -8,7 +8,7 @@ the three-minute timer expires.
 
 - Collect water, soda, chips, and the correct meat, fish, or vegetarian meal.
 - Serve every item shown over a passenger before their patience runs out.
-- A completed order leaves trash. Take it to the bin at either end.
+- A completed order leaves trash. Take it to the bin at the front.
 - Correct items earn points; wrong or duplicate service costs 50 points.
 - The one-person aisle means crew must coordinate and make room.
 - Earn stars at 500, 1,100, and 1,800 points.

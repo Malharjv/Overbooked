@@ -66,9 +66,12 @@ export default function ItemIcon({
   if (item === "veg") {
     return (
       <svg {...common}>
-        <path d="M31 27C17 11 7 20 12 33c4 10 13 13 20 12 7 1 16-2 20-12 5-13-5-22-19-6Z" fill="#65C96F" stroke="#13244A" strokeWidth="4" strokeLinejoin="round" />
-        <path d="M32 28C30 16 34 9 44 6M33 18c6 0 10 2 13 6" fill="none" stroke="#287B49" strokeWidth="4" strokeLinecap="round" />
-        <path d="M25 36h14" stroke="#B9F1A6" strokeWidth="3" strokeLinecap="round" />
+        <path d="M11 29h42c-1 15-9 24-21 24S12 44 11 29Z" fill="#F6E5B4" stroke="#13244A" strokeWidth="4" strokeLinejoin="round" />
+        <path d="M9 29h46" stroke="#13244A" strokeWidth="4" strokeLinecap="round" />
+        <path d="m34 30 9-20 7 4-11 18" fill="#F19A38" stroke="#13244A" strokeWidth="3" strokeLinejoin="round" />
+        <path d="M24 28c-9-2-11-10-5-14 1-7 12-7 14 0 7 2 6 12-1 14Z" fill="#62C66D" stroke="#13244A" strokeWidth="3" strokeLinejoin="round" />
+        <path d="M27 18v11" stroke="#287B49" strokeWidth="3" strokeLinecap="round" />
+        <circle cx="46" cy="25" r="5" fill="#E85A65" stroke="#13244A" strokeWidth="3" />
       </svg>
     );
   }

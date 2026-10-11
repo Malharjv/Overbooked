@@ -24,12 +24,17 @@ const seatPosition = (seatId: number): [number, number, number] => {
 };
 
 function CameraRig({ player }: { player?: Player }) {
-  const camera = useThree((state) => state.camera) as OrthographicCamera;
+  const { camera, size } = useThree((state) => ({
+    camera: state.camera as OrthographicCamera,
+    size: state.size,
+  }));
   const target = useRef(new Vector3());
   const desiredPosition = useRef(new Vector3());
 
   useFrame(() => {
-    const focusZ = Math.max(-4.6, Math.min(4.6, player?.z ?? 0));
+    // Follow the steward without centering them: the extra rearward bias keeps
+    // the long cabin framed below the HUD instead of clipping its tail.
+    const focusZ = Math.max(-5.6, Math.min(0, (player?.z ?? 0) * 0.55 - 3.4));
     target.current.set(0, 0.45, focusZ);
     desiredPosition.current.set(7.4, 19.5, focusZ + 11.5);
     camera.position.lerp(desiredPosition.current, 0.075);
@@ -37,9 +42,10 @@ function CameraRig({ player }: { player?: Player }) {
   });
 
   useEffect(() => {
-    camera.zoom = 58;
+    // Keep the same composition on Retina, laptop, and large desktop screens.
+    camera.zoom = size.height / 19;
     camera.updateProjectionMatrix();
-  }, [camera]);
+  }, [camera, size.height]);
 
   return null;
 }
@@ -285,6 +291,25 @@ function CrewMember({
         <RoundedBox args={[0.55, 0.66, 0.36]} radius={0.14} smoothness={3} position={[0, 0.72, 0]} castShadow>
           <meshStandardMaterial color={player.color} roughness={0.55} />
         </RoundedBox>
+        <mesh position={[0, 0.48, 0]} castShadow>
+          <cylinderGeometry args={[0.24, 0.34, 0.38, 12]} />
+          <meshStandardMaterial color={player.color} roughness={0.58} />
+        </mesh>
+        <RoundedBox args={[0.18, 0.38, 0.035]} radius={0.025} smoothness={2} position={[0, 0.82, 0.2]}>
+          <meshStandardMaterial color="#fffaf0" />
+        </RoundedBox>
+        <mesh position={[-0.09, 0.91, 0.225]} rotation-z={-0.48}>
+          <boxGeometry args={[0.14, 0.25, 0.025]} />
+          <meshStandardMaterial color="#fffaf0" />
+        </mesh>
+        <mesh position={[0.09, 0.91, 0.225]} rotation-z={0.48}>
+          <boxGeometry args={[0.14, 0.25, 0.025]} />
+          <meshStandardMaterial color="#fffaf0" />
+        </mesh>
+        <mesh position={[0, 0.56, 0.205]}>
+          <boxGeometry args={[0.49, 0.065, 0.035]} />
+          <meshStandardMaterial color="#26385f" />
+        </mesh>
         <mesh ref={leftArm} position={[-0.34, 0.75, 0]} rotation-z={-0.15} castShadow>
           <capsuleGeometry args={[0.07, 0.34, 5, 8]} />
           <meshStandardMaterial color={player.color} />
@@ -300,6 +325,26 @@ function CrewMember({
         <mesh position={[0, 1.35, -0.04]} castShadow>
           <sphereGeometry args={[0.275, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
           <meshStandardMaterial color={["#392a28", "#e2a33d", "#5b382c"][player.id.charCodeAt(0) % 3]} />
+        </mesh>
+        <mesh position={[0, 1.2, -0.24]} castShadow>
+          <sphereGeometry args={[0.13, 12, 9]} />
+          <meshStandardMaterial color={["#392a28", "#e2a33d", "#5b382c"][player.id.charCodeAt(0) % 3]} />
+        </mesh>
+        <mesh position={[0, 1.01, 0]} rotation-x={Math.PI / 2}>
+          <torusGeometry args={[0.13, 0.033, 7, 16]} />
+          <meshStandardMaterial color="#e84f66" />
+        </mesh>
+        <mesh position={[0, 1.53, -0.015]} castShadow>
+          <cylinderGeometry args={[0.19, 0.22, 0.1, 16]} />
+          <meshStandardMaterial color={player.color} roughness={0.5} />
+        </mesh>
+        <mesh position={[0, 1.47, 0.08]}>
+          <boxGeometry args={[0.47, 0.035, 0.27]} />
+          <meshStandardMaterial color={player.color} />
+        </mesh>
+        <mesh position={[0, 1.53, 0.185]}>
+          <boxGeometry args={[0.13, 0.035, 0.018]} />
+          <meshStandardMaterial color="#ffe06b" metalness={0.25} />
         </mesh>
         <mesh position={[-0.095, 1.23, 0.245]}>
           <sphereGeometry args={[0.027, 8, 6]} />
@@ -342,6 +387,7 @@ function CrewMember({
 function PassengerSeat({ seatId, order }: { seatId: number; order?: Order }) {
   const [x, y, z] = seatPosition(seatId);
   const remaining = order?.items.filter((item) => !order.served.includes(item));
+  const expiring = Boolean(order && order.expiresAt - Date.now() <= 3000);
   const fabric = order ? "#526ed0" : seatId % 2 ? "#355387" : "#3d5d95";
   const skin = ["#8f5e45", "#e5ac7c", "#6f4637", "#d79a72"][seatId % 4];
   return (
@@ -393,7 +439,7 @@ function PassengerSeat({ seatId, order }: { seatId: number; order?: Order }) {
       </mesh>
       {order && remaining && (
         <Html center position={[0, 1.55, 0]}>
-          <div className="order-bubble">
+          <div className={`order-bubble ${expiring ? "expiring" : ""}`}>
             <small>{seatId % 4 === 0 || seatId % 4 === 3 ? "WINDOW" : "AISLE"}</small>
             <div>
               {remaining.map((item) => (
@@ -405,7 +451,7 @@ function PassengerSeat({ seatId, order }: { seatId: number; order?: Order }) {
             <span
               className="patience"
               style={{
-                width: `${Math.max(0, Math.min(100, ((order.expiresAt - Date.now()) / 38000) * 100))}%`,
+                width: `${Math.max(0, Math.min(100, ((order.expiresAt - Date.now()) / 42000) * 100))}%`,
               }}
             />
           </div>
@@ -524,6 +570,39 @@ function AircraftBody() {
         <boxGeometry args={[0.15, 0.72, 0.72]} />
         <meshStandardMaterial color="#ff5d73" />
       </mesh>
+      {[-4.55, 4.55].map((x) => (
+        <group key={`engine-${x}`} position={[x, 0.02, -0.15]}>
+          <mesh rotation-x={Math.PI / 2} castShadow>
+            <cylinderGeometry args={[0.48, 0.6, 1.8, 24]} />
+            <meshStandardMaterial color="#dce5eb" metalness={0.2} roughness={0.42} />
+          </mesh>
+          <mesh position={[0, 0, 0.91]}>
+            <torusGeometry args={[0.42, 0.11, 10, 24]} />
+            <meshStandardMaterial color="#4264b6" metalness={0.28} />
+          </mesh>
+          <mesh position={[0, 0, 0.92]}>
+            <circleGeometry args={[0.31, 20]} />
+            <meshStandardMaterial color="#182748" metalness={0.5} roughness={0.3} />
+          </mesh>
+        </group>
+      ))}
+      {[-1, 1].map((side) => (
+        <group key={`cockpit-${side}`} position={[side * 0.78, 0.42, 8.87]} rotation-y={side * -0.18}>
+          <RoundedBox args={[1.18, 0.08, 0.72]} radius={0.16} smoothness={4}>
+            <meshStandardMaterial color="#244875" metalness={0.25} roughness={0.2} />
+          </RoundedBox>
+          <mesh position={[0, 0.05, -0.04]}>
+            <boxGeometry args={[0.055, 0.025, 0.57]} />
+            <meshStandardMaterial color="#86d9ef" emissive="#55b5d5" emissiveIntensity={0.2} />
+          </mesh>
+        </group>
+      ))}
+      {[-1, 1].map((side) => (
+        <mesh key={`winglet-${side}`} position={[side * 7.35, 0.28, -1.08]} rotation-z={side * -0.22}>
+          <boxGeometry args={[0.16, 0.62, 0.78]} />
+          <meshStandardMaterial color="#ff5d73" />
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -561,7 +640,7 @@ function Cabin({
       />
       <Environment preset="city" />
 
-      <group>
+      <group scale={1.08}>
         <AircraftBody />
         {[-3.05, 3.05].map((x) => (
           <group key={x}>
@@ -647,17 +726,15 @@ function Cabin({
         <Supply item="meat" label="MEAT" position={[1.25, 0.55, -6.35]} />
         <Supply item="fish" label="FISH" position={[1.25, 0.55, -7.3]} />
         <Supply item="veg" label="VEG" position={[1.25, 0.55, -8.25]} />
-        {[8.65, -8.65].map((z) => (
-          <group key={z} position={[0, 0.25, z]}>
-            <mesh>
-              <cylinderGeometry args={[0.4, 0.34, 0.55, 12]} />
-              <meshStandardMaterial color="#273352" />
-            </mesh>
-            <Html center position={[0, 0.72, 0]}>
-              <div className="trash-label"><ItemIcon item="trash" size={20} /> TRASH</div>
-            </Html>
-          </group>
-        ))}
+        <group position={[0, 0.25, 8.65]}>
+          <mesh>
+            <cylinderGeometry args={[0.4, 0.34, 0.55, 12]} />
+            <meshStandardMaterial color="#273352" />
+          </mesh>
+          <Html center position={[0, 0.72, 0]}>
+            <div className="trash-label"><ItemIcon item="trash" size={20} /> TRASH</div>
+          </Html>
+        </group>
         {room.messes.map((mess) => (
           <group key={mess.id} position={[mess.x, 0.28, mess.z]}>
             <mesh rotation-x={-Math.PI / 2}>
@@ -698,7 +775,7 @@ export default function GameScene(props: {
       shadows
       dpr={[1, 1.6]}
       orthographic
-      camera={{ position: [7.4, 19.5, 11.5], zoom: 58, near: 0.1, far: 100 }}
+      camera={{ position: [7.4, 19.5, 11.5], zoom: 48, near: 0.1, far: 100 }}
       gl={{ antialias: true }}
     >
       <CameraRig player={props.room.players.find((player) => player.id === props.playerId)} />
