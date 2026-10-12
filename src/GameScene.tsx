@@ -2,10 +2,12 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Html, RoundedBox } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import { Shape, Vector3 } from "three";
-import type { Group, Mesh, OrthographicCamera } from "three";
+import type { Group, Mesh, OrthographicCamera, PointLight } from "three";
 import type { Socket } from "socket.io-client";
 import type { ItemName, Order, Player, RoomState } from "./types";
 import ItemIcon from "./ItemIcon";
+import { FLIGHT_MAPS } from "./maps";
+import type { FlightMap } from "./maps";
 
 const ITEM_META: Record<ItemName | "trash", { label: string; color: string }> = {
   water: { label: "WATER", color: "#55c6ff" },
@@ -48,6 +50,97 @@ function CameraRig({ player }: { player?: Player }) {
   }, [camera, size.height]);
 
   return null;
+}
+
+function WeatherLayer({ map }: { map: FlightMap }) {
+  const weather = useRef<Group>(null);
+  const lightning = useRef<PointLight>(null);
+  const cloudColor = map.id === "smooth-skies" ? "#ffffff" : map.id === "turbulent-torrent" ? "#b7c8cd" : "#536078";
+  const particles = useMemo(
+    () =>
+      Array.from({ length: map.environment.rain ? 72 : 24 }, (_, index) => ({
+        x: ((index * 37) % 29) - 14,
+        y: 2 + ((index * 17) % 12),
+        z: ((index * 23) % 31) - 15,
+        scale: 0.55 + ((index * 13) % 8) / 10,
+      })),
+    [map.environment.rain],
+  );
+
+  useFrame((state, delta) => {
+    if (weather.current) {
+      const speed = 1.2 + map.environment.wind * 7;
+      weather.current.children.forEach((child, index) => {
+        if (!child.userData.weatherParticle) return;
+        child.position.x += delta * speed;
+        child.position.z -= delta * speed * (map.environment.rain ? 1.7 : 0.2);
+        if (child.position.x > 15) child.position.x = -15;
+        if (child.position.z < -16) child.position.z = 16;
+        child.rotation.z = map.environment.rain ? -0.45 : Math.PI / 2;
+        child.userData.phase = (child.userData.phase ?? index) + delta;
+      });
+    }
+    if (lightning.current) {
+      const pulse =
+        map.environment.lightning &&
+        (Math.sin(state.clock.elapsedTime * 0.72) > 0.985 ||
+          Math.sin(state.clock.elapsedTime * 1.93) > 0.997);
+      lightning.current.intensity = pulse ? 18 : 0;
+    }
+  });
+
+  return (
+    <group>
+      <mesh position={[0, -1.6, -6]} rotation-x={-Math.PI / 2}>
+        <planeGeometry args={[80, 80]} />
+        <meshBasicMaterial color={map.palette.horizon} />
+      </mesh>
+      {[
+        [-10, 0.2, -9],
+        [10, -0.2, -6],
+        [-9, 0.8, 8],
+        [11, 1.2, 9],
+      ].map(([x, y, z], cloudIndex) => (
+        <group key={cloudIndex} position={[x, y, z]} scale={map.id === "smooth-skies" ? 1 : 1.45}>
+          {[
+            [-0.8, 0, 0],
+            [0, 0.28, 0],
+            [0.9, 0, 0],
+            [0.2, -0.1, 0.45],
+          ].map(([cx, cy, cz], index) => (
+            <mesh key={index} position={[cx, cy, cz]}>
+              <sphereGeometry args={[1.15 - index * 0.08, 14, 10]} />
+              <meshStandardMaterial
+                color={cloudColor}
+                transparent
+                opacity={map.id === "stormy-service" ? 0.82 : 0.68}
+                roughness={1}
+              />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      <group ref={weather}>
+        {map.environment.wind > 0.3 &&
+          particles.map((particle, index) => (
+            <mesh
+              key={index}
+              position={[particle.x, particle.y, particle.z]}
+              scale={particle.scale}
+              userData={{ weatherParticle: true }}
+            >
+              <boxGeometry args={map.environment.rain ? [0.025, 0.025, 0.85] : [1.15, 0.025, 0.025]} />
+              <meshBasicMaterial
+                color={map.environment.rain ? "#b9d8ff" : "#e5f5f5"}
+                transparent
+                opacity={map.environment.rain ? 0.7 : 0.34}
+              />
+            </mesh>
+          ))}
+      </group>
+      <pointLight ref={lightning} position={[-5, 12, -4]} color="#dce7ff" intensity={0} distance={40} />
+    </group>
+  );
 }
 
 function ItemModel({
@@ -536,7 +629,7 @@ function Supply({
   );
 }
 
-function AircraftBody() {
+function AircraftBody({ accent }: { accent: string }) {
   const fuselage = useMemo(() => {
     const shape = new Shape();
     shape.moveTo(-3.1, -7.8);
@@ -601,7 +694,7 @@ function AircraftBody() {
       ))}
       <mesh position={[0, 0.42, -8.55]} rotation-x={-0.12}>
         <boxGeometry args={[0.13, 1.8, 1.65]} />
-        <meshStandardMaterial color="#4264b6" roughness={0.48} />
+        <meshStandardMaterial color={accent} roughness={0.48} />
       </mesh>
       <mesh position={[0, 1.12, -9.05]} rotation-x={-0.12}>
         <boxGeometry args={[0.15, 0.72, 0.72]} />
@@ -615,7 +708,7 @@ function AircraftBody() {
           </mesh>
           <mesh position={[0, 0, 0.91]}>
             <torusGeometry args={[0.42, 0.11, 10, 24]} />
-            <meshStandardMaterial color="#4264b6" metalness={0.28} />
+            <meshStandardMaterial color={accent} metalness={0.28} />
           </mesh>
           <mesh position={[0, 0, 0.92]}>
             <circleGeometry args={[0.31, 20]} />
@@ -659,6 +752,7 @@ function Cabin({
   mobileSqueezing: boolean;
   seatPreference: "aisle" | "window";
 }) {
+  const map = FLIGHT_MAPS[room.mapId];
   const orderBySeat = useMemo(
     () => new Map(room.orders.map((order) => [order.seatId, order])),
     [room.orders],
@@ -666,19 +760,21 @@ function Cabin({
 
   return (
     <>
-      <color attach="background" args={["#91d8ef"]} />
-      <fog attach="fog" args={["#91d8ef", 23, 42]} />
-      <ambientLight intensity={1.8} />
+      <color attach="background" args={[map.palette.sky]} />
+      <fog attach="fog" args={[map.palette.fog, 22, 45]} />
+      <ambientLight intensity={map.id === "stormy-service" ? 0.85 : 1.8} />
       <directionalLight
         position={[-7, 14, 9]}
-        intensity={2.4}
+        intensity={map.id === "stormy-service" ? 1.25 : 2.4}
+        color={map.palette.light}
         castShadow
         shadow-mapSize={[2048, 2048]}
       />
       <Environment preset="city" />
+      <WeatherLayer map={map} />
 
       <group scale={1.08}>
-        <AircraftBody />
+        <AircraftBody accent={map.palette.cabinAccent} />
         {[-3.05, 3.05].map((x) => (
           <group key={x}>
             <RoundedBox
@@ -692,7 +788,7 @@ function Cabin({
             </RoundedBox>
             <mesh position={[x - Math.sign(x) * 0.13, 0.43, 0]}>
               <boxGeometry args={[0.04, 0.12, 17.7]} />
-              <meshStandardMaterial color="#4264b6" />
+              <meshStandardMaterial color={map.palette.cabinAccent} />
             </mesh>
             {x < 0 && Array.from({ length: 8 }, (_, row) => (
               <group key={row} position={[x - Math.sign(x) * 0.12, 1.02, 5.25 - row * 1.5]}>
@@ -739,7 +835,7 @@ function Cabin({
         </RoundedBox>
         <RoundedBox args={[1.1, 0.07, 17.5]} radius={0.035} smoothness={2} position={[0, 0.26, 0]}>
           <meshStandardMaterial
-            color="#1e326b"
+            color={map.palette.carpet}
             roughness={0.96}
             polygonOffset
             polygonOffsetFactor={-1}

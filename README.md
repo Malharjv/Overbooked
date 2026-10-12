@@ -4,7 +4,16 @@ A real-time cooperative 3D cabin-crew game for 1–4 players. Create a flight,
 share its four-character code or invite link, and serve 32 passengers before
 the three-minute timer expires.
 
-## Level 1 rules
+## Flight maps
+
+- **Smooth Skies** — a bright, calm daytime route and the default flight.
+- **Turbulent Torrent** — a windswept route through fast cloud banks.
+- **Stormy Service** — a dark thunderstorm route with driving rain and lightning.
+
+The captain selects the map in the lobby. Map weather configurations are kept
+separate so their gameplay modifiers can be developed independently.
+
+## Rules
 
 - Collect water, soda, chips, and the correct meat, fish, or vegetarian meal.
 - Carry up to three items at once on each steward's tray.

@@ -7,6 +7,7 @@ import { Server } from "socket.io";
 import { nanoid } from "nanoid";
 
 const FLIGHT_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const MAP_IDS = new Set(["smooth-skies", "turbulent-torrent", "stormy-service"]);
 
 function randomFlightCode() {
   let code = "";
@@ -56,6 +57,7 @@ function publicRoom(room) {
   return {
     code: room.code,
     hostId: room.hostId,
+    mapId: room.mapId,
     status: room.status,
     score: room.score,
     timeLeft: room.timeLeft,
@@ -72,6 +74,7 @@ function emitRoom(room) {
 function createRoom(code) {
   const room = {
     code,
+    mapId: "smooth-skies",
     status: "lobby",
     score: 0,
     timeLeft: ROUND_SECONDS,
@@ -236,6 +239,20 @@ io.on("connection", (socket) => {
   socket.on("start-game", () => {
     const room = rooms.get(socket.data.roomCode);
     if (room && socket.data.playerId === room.hostId) startRound(room);
+  });
+
+  socket.on("set-map", ({ mapId }) => {
+    const room = rooms.get(socket.data.roomCode);
+    if (
+      !room ||
+      room.status !== "lobby" ||
+      socket.data.playerId !== room.hostId ||
+      !MAP_IDS.has(mapId)
+    ) {
+      return;
+    }
+    room.mapId = mapId;
+    emitRoom(room);
   });
 
   socket.on("move", ({ x, z, facing, squeezing = false }) => {

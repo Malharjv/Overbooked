@@ -119,6 +119,57 @@ kbd { padding:3px 6px; border:1px solid #aab3c7; border-bottom-width:3px; border
   box-shadow:0 5px 0 rgba(20,35,75,.88);
 }
 .copy-status { min-height:19px; color:#7a849c; font-size:12px; font-weight:800; margin:10px 0 18px; }
+.map-select {
+  margin:0 0 20px;
+  padding:17px;
+  text-align:left;
+  border:2px solid #cbd2df;
+  border-radius:17px;
+  background:#eef1f5;
+}
+.map-select-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.map-select-heading .eyebrow { margin:0 0 2px; font-size:9px; }
+.map-select-heading h2 { margin:0; font:700 20px "Fredoka"; color:var(--navy); }
+.difficulty { padding:5px 8px; border:2px solid var(--navy); border-radius:7px; font-size:8px; font-weight:900; letter-spacing:1px; }
+.difficulty.calm { color:#277662; background:#c9f3df; }
+.difficulty.breezy { color:#76541d; background:#ffe2a2; }
+.difficulty.severe { color:#fff; background:#b94866; }
+.map-cards { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+.map-card {
+  position:relative;
+  min-width:0;
+  overflow:hidden;
+  padding:0 0 9px;
+  text-align:left;
+  color:var(--navy);
+  border:2px solid #aeb8ca;
+  border-radius:12px;
+  background:#fff;
+  transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+.map-card:disabled { opacity:1; cursor:default; }
+.map-card:not(:disabled):hover { transform:translateY(-2px); border-color:var(--navy); }
+.map-card.selected { border:3px solid var(--navy); box-shadow:0 4px 0 var(--navy); transform:translateY(-2px); }
+.map-art { position:relative; height:58px; display:block; overflow:hidden; border-bottom:2px solid rgba(20,35,75,.28); }
+.map-art::before,
+.map-art::after { content:""; position:absolute; border-radius:50%; background:rgba(255,255,255,.64); }
+.map-art::before { width:54px; height:18px; left:-8px; bottom:8px; }
+.map-art::after { width:65px; height:22px; right:-12px; top:8px; }
+.map-art i { position:absolute; top:6px; left:8px; z-index:1; color:#fff; font:900 20px "Fredoka"; text-shadow:0 2px 0 rgba(20,35,75,.35); }
+.map-plane { position:absolute; right:13px; bottom:12px; z-index:1; color:#fff; font-size:20px; transform:rotate(-12deg); text-shadow:0 2px 0 rgba(20,35,75,.4); }
+.map-smooth-skies .map-art { background:linear-gradient(155deg, #8de1f1, #4fb2df); }
+.map-turbulent-torrent .map-art { background:linear-gradient(155deg, #89afb9, #456e83); }
+.map-turbulent-torrent .map-art::before,
+.map-turbulent-torrent .map-art::after { transform:skewX(-24deg); background:rgba(224,239,238,.5); }
+.map-stormy-service .map-art { background:linear-gradient(155deg, #52617a, #172746); }
+.map-stormy-service .map-art::before,
+.map-stormy-service .map-art::after { background:rgba(107,121,146,.7); }
+.map-copy { display:block; padding:7px 8px 0; }
+.map-copy strong { display:block; font:700 12px/1.1 "Fredoka"; }
+.map-copy small { display:block; min-height:22px; margin-top:3px; color:#778198; font-size:7px; font-weight:900; line-height:1.2; text-transform:uppercase; }
+.map-check { position:absolute; top:5px; right:5px; z-index:2; width:19px; height:19px; display:none; place-items:center; color:white; background:#57b87b; border:2px solid white; border-radius:50%; font-size:9px; }
+.map-card.selected .map-check { display:grid; }
+.map-description { margin:12px 2px 0; color:#657088; font-size:11px; font-weight:800; line-height:1.35; }
 .crew-list { text-align:left; border-top:2px dashed #c7cedb; padding-top:14px; }
 .crew-list h2 { display:flex; justify-content:space-between; font:700 20px "Fredoka"; margin:0 0 4px; }
 .crew-list h2 span { color:#75809b; }
@@ -145,6 +196,27 @@ kbd { padding:3px 6px; border:1px solid #aab3c7; border-bottom-width:3px; border
 .game { width:100vw; height:100vh; position:relative; background:#8ed9ee; }
 .game canvas { display:block; width:100%; height:100%; }
 .game-hud { position:absolute; top:17px; left:50%; transform:translateX(-50%); display:flex; gap:12px; align-items:flex-start; pointer-events:none; }
+.map-hud {
+  position:absolute;
+  top:18px;
+  left:18px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:155px;
+  padding:8px 11px;
+  color:white;
+  background:rgba(20,35,75,.94);
+  border:2px solid white;
+  border-radius:11px;
+  box-shadow:0 4px 0 rgba(9,19,46,.7);
+  pointer-events:none;
+}
+.map-hud > span { width:29px; height:29px; display:grid; place-items:center; border-radius:8px; background:#ffcf55; color:var(--navy); font:900 18px "Fredoka"; }
+.map-hud small { display:block; color:#9faaca; font-size:7px; font-weight:900; letter-spacing:1px; }
+.map-hud strong { display:block; font:700 10px "Fredoka"; letter-spacing:.5px; }
+.map-hud.map-turbulent-torrent > span { background:#e19a3e; }
+.map-hud.map-stormy-service > span { color:white; background:#b44f78; }
 .hud-panel { min-width:150px; padding:11px 22px 12px; text-align:center; color:white; background:#14234b; border:3px solid white; border-radius:13px; box-shadow:0 5px 0 #09132e, 0 9px 18px rgba(9,19,46,.25); }
 .hud-panel small { display:block; font-size:9px; letter-spacing:1.4px; font-weight:900; opacity:.7; }
 .hud-panel strong { font:700 28px "Fredoka"; }
@@ -207,6 +279,7 @@ kbd { padding:3px 6px; border:1px solid #aab3c7; border-bottom-width:3px; border
 .game.finished .held-item,
 .game.finished .name-tag,
 .game.finished .mini-manifest,
+.game.finished .map-hud,
 .game.finished .service-picker,
 .game.finished .desktop-tip,
 .game.finished .touch-controls { display:none; }
@@ -248,10 +321,17 @@ kbd { padding:3px 6px; border:1px solid #aab3c7; border-bottom-width:3px; border
   .controls-hint { display:none; }
   .lobby-card { padding:20px 18px 24px; }
   .lobby-stack .rules { display:none; }
+  .map-cards { grid-template-columns:1fr; }
+  .map-art { width:82px; height:58px; float:left; margin-right:4px; border:0; border-right:2px solid rgba(20,35,75,.28); }
+  .map-card { min-height:62px; padding:0; }
+  .map-copy { padding:13px 8px 0; }
+  .map-copy strong { font-size:14px; }
+  .map-description { display:none; }
   .touch-controls { display:flex; }
   .service-picker { display:none; }
   .desktop-tip { display:none; }
   .game-hud { top:9px; gap:5px; width:calc(100% - 16px); justify-content:center; }
+  .map-hud { top:79px; left:8px; min-width:132px; transform:scale(.88); transform-origin:top left; }
   .hud-panel { min-width:0; flex:1; padding:7px 5px; }
   .hud-panel strong { font-size:19px; }
   .mini-manifest { top:83px; right:8px; transform:scale(.88); transform-origin:top right; }

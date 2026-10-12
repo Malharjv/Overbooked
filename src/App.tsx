@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
 import GameScene from "./GameScene";
 import ItemIcon from "./ItemIcon";
-import type { RoomState } from "./types";
+import { FLIGHT_MAP_LIST, FLIGHT_MAPS } from "./maps";
+import type { MapId, RoomState } from "./types";
 
 const socket = io();
 
@@ -142,12 +143,16 @@ function Lobby({
   room,
   playerId,
   onStart,
+  onSelectMap,
 }: {
   room: RoomState;
   playerId: string;
   onStart: () => void;
+  onSelectMap: (mapId: MapId) => void;
 }) {
   const flightCode = sanitizeFlightCode(room.code);
+  const selectedMap = FLIGHT_MAPS[room.mapId];
+  const isHost = playerId === room.hostId;
   const shareUrl = `${location.origin}${location.pathname}?flight=${flightCode}`;
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -175,6 +180,40 @@ function Lobby({
           ))}
         </button>
         <p className="copy-status">{copied ? "Invite copied!" : "Tap code to copy the invite link"}</p>
+        <section className="map-select">
+          <div className="map-select-heading">
+            <div>
+              <span className="eyebrow">CHOOSE YOUR FLIGHT</span>
+              <h2>{isHost ? "Select a route" : "Captain’s route"}</h2>
+            </div>
+            <span className={`difficulty ${selectedMap.difficulty.toLowerCase()}`}>
+              {selectedMap.difficulty}
+            </span>
+          </div>
+          <div className="map-cards">
+            {FLIGHT_MAP_LIST.map((map) => (
+              <button
+                type="button"
+                className={`map-card map-${map.id} ${room.mapId === map.id ? "selected" : ""}`}
+                key={map.id}
+                onClick={() => isHost && onSelectMap(map.id)}
+                disabled={!isHost}
+                aria-pressed={room.mapId === map.id}
+              >
+                <span className="map-art" aria-hidden="true">
+                  <i>{map.icon}</i>
+                  <b className="map-plane">✈</b>
+                </span>
+                <span className="map-copy">
+                  <strong>{map.name}</strong>
+                  <small>{map.forecast}</small>
+                </span>
+                <span className="map-check">✓</span>
+              </button>
+            ))}
+          </div>
+          <p className="map-description">{selectedMap.description}</p>
+        </section>
         <div className="crew-list">
           <h2>Crew manifest <span>{room.players.length}/4</span></h2>
           {room.players.map((player) => (
@@ -189,9 +228,9 @@ function Lobby({
             <div className="crew-row empty" key={index}>Waiting for crew…</div>
           ))}
         </div>
-        {playerId === room.hostId ? (
+        {isHost ? (
           <button className="primary depart" onClick={onStart}>
-            START LEVEL 1
+            DEPART: {selectedMap.shortName}
           </button>
         ) : (
           <p className="waiting">Waiting for the captain to start…</p>
@@ -276,7 +315,7 @@ function Finished({
   return (
     <div className="result-overlay">
       <section className="result-card">
-        <p className="eyebrow">FLIGHT COMPLETE</p>
+        <p className="eyebrow">{FLIGHT_MAPS[room.mapId].shortName} · FLIGHT COMPLETE</p>
         <h1>{stars >= 2 ? "Smooth landing!" : stars === 1 ? "Made it!" : "Turbulent service!"}</h1>
         <div className="stars">
           {[0, 1, 2].map((index) => <span className={index < stars ? "earned" : ""} key={index}>★</span>)}
@@ -348,7 +387,12 @@ export default function App() {
   if (room.status === "lobby") {
     return (
       <>
-        <Lobby room={room} playerId={playerId} onStart={() => socket.emit("start-game")} />
+        <Lobby
+          room={room}
+          playerId={playerId}
+          onStart={() => socket.emit("start-game")}
+          onSelectMap={(mapId) => socket.emit("set-map", { mapId })}
+        />
         {error && <div className="toast">{error}</div>}
       </>
     );
@@ -369,6 +413,13 @@ export default function App() {
         <div className={`hud-panel timer ${room.timeLeft <= 30 ? "urgent" : ""}`}><small>TIME LEFT</small><strong>{time}</strong></div>
         <div className="hud-panel orders"><small>OPEN ORDERS</small><strong>{room.orders.length}</strong></div>
       </header>
+      <div className={`map-hud map-${room.mapId}`}>
+        <span>{FLIGHT_MAPS[room.mapId].icon}</span>
+        <div>
+          <small>ROUTE</small>
+          <strong>{FLIGHT_MAPS[room.mapId].shortName}</strong>
+        </div>
+      </div>
       <aside className="mini-manifest">
         {room.orders.slice(0, 5).map((order) => (
           <div

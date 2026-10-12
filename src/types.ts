@@ -1,4 +1,5 @@
 export type ItemName = "water" | "soda" | "chips" | "meat" | "fish" | "veg";
+export type MapId = "smooth-skies" | "turbulent-torrent" | "stormy-service";
 
 export interface HeldItem {
   type: "item" | "trash";
@@ -36,6 +37,7 @@ export interface Mess {
 export interface RoomState {
   code: string;
   hostId: string;
+  mapId: MapId;
   status: "lobby" | "playing" | "finished";
   score: number;
   timeLeft: number;
