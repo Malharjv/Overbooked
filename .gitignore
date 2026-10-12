@@ -3,3 +3,5 @@ dist
 .DS_Store
 .env
 *.log
+.agents/
+skills-lock.json

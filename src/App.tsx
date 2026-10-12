@@ -6,9 +6,14 @@ import type { RoomState } from "./types";
 
 const socket = io();
 
-function Logo() {
+const sanitizeFlightCode = (raw: string) =>
+  raw.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
+
+const isValidFlightCode = (code: string) => /^[A-Z]{4}$/.test(code);
+
+function Logo({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="logo">
+    <div className={`logo ${compact ? "compact" : ""}`}>
       <span className="logo-wing">✦</span>
       <div>
         <small>FLIGHT 001</small>
@@ -49,7 +54,9 @@ function Home({
 }) {
   const params = new URLSearchParams(location.search);
   const [name, setName] = useState(() => localStorage.getItem("crew-name") || "");
-  const [code, setCode] = useState(params.get("flight") || "");
+  const [code, setCode] = useState(() =>
+    sanitizeFlightCode(params.get("flight") || ""),
+  );
   const [showJoin, setShowJoin] = useState(Boolean(params.get("flight")));
 
   const saveAnd = (action: () => void) => {
@@ -64,6 +71,7 @@ function Home({
       <div className="cloud cloud-one" />
       <div className="cloud cloud-two" />
       <div className="plane-streak">✈</div>
+      <div className="home-stack">
       <div className="home-card">
         <Logo />
         <p className="tagline">Fasten your seatbelts. Service is about to get chaotic.</p>
@@ -84,8 +92,13 @@ function Home({
               className="code-input"
               value={code}
               maxLength={4}
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
+              onChange={(event) =>
+                setCode(sanitizeFlightCode(event.target.value))
+              }
               placeholder="ABCD"
+              inputMode="text"
+              autoCapitalize="characters"
+              spellCheck={false}
             />
           </label>
         )}
@@ -94,7 +107,7 @@ function Home({
             <>
               <button
                 className="primary"
-                disabled={!name.trim() || code.length !== 4}
+                disabled={!name.trim() || !isValidFlightCode(code)}
                 onClick={() => saveAnd(() => onJoin(name, code))}
               >
                 BOARD FLIGHT
@@ -120,6 +133,7 @@ function Home({
         </div>
       </div>
       <Rules />
+      </div>
     </main>
   );
 }
@@ -133,20 +147,32 @@ function Lobby({
   playerId: string;
   onStart: () => void;
 }) {
-  const shareUrl = `${location.origin}${location.pathname}?flight=${room.code}`;
+  const flightCode = sanitizeFlightCode(room.code);
+  const shareUrl = `${location.origin}${location.pathname}?flight=${flightCode}`;
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await navigator.clipboard.writeText(shareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
+
   return (
     <main className="lobby-page">
-      <Logo />
+      <div className="lobby-stack">
       <section className="lobby-card">
+        <Logo compact />
         <p className="eyebrow">YOUR FLIGHT CODE</p>
-        <button className="flight-code" onClick={copy} title="Copy invite link">
-          {room.code}
+        <button
+          type="button"
+          className="flight-code"
+          onClick={copy}
+          title="Copy invite link"
+        >
+          {flightCode.split("").map((letter, index) => (
+            <span className="code-letter" key={`${letter}-${index}`}>
+              {letter}
+            </span>
+          ))}
         </button>
         <p className="copy-status">{copied ? "Invite copied!" : "Tap code to copy the invite link"}</p>
         <div className="crew-list">
@@ -172,6 +198,7 @@ function Lobby({
         )}
       </section>
       <Rules compact />
+      </div>
     </main>
   );
 }

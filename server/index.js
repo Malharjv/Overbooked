@@ -1,9 +1,26 @@
 import express from "express";
 import { createServer } from "node:http";
+import { randomInt } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { Server } from "socket.io";
 import { nanoid } from "nanoid";
+
+const FLIGHT_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+function randomFlightCode() {
+  let code = "";
+  for (let i = 0; i < 4; i++) code += FLIGHT_ALPHABET[randomInt(26)];
+  return code;
+}
+
+function normalizeFlightCode(raw) {
+  const code = String(raw ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  return code.length === 4 ? code : null;
+}
 
 const PORT = process.env.PORT || 3001;
 const ROUND_SECONDS = 180;
@@ -196,14 +213,18 @@ function seatPosition(seatId) {
 io.on("connection", (socket) => {
   socket.on("create-room", ({ name }, callback) => {
     let code;
-    do code = nanoid(4).toUpperCase();
+    do code = randomFlightCode();
     while (rooms.has(code));
     const room = createRoom(code);
     joinRoom(socket, room, name, callback);
   });
 
   socket.on("join-room", ({ code, name }, callback) => {
-    const room = rooms.get(String(code).trim().toUpperCase());
+    const normalized = normalizeFlightCode(code);
+    if (!normalized) {
+      return callback?.({ error: "Flight code must be 4 letters (A–Z)." });
+    }
+    const room = rooms.get(normalized);
     if (!room) return callback?.({ error: "Flight not found." });
     if (room.status === "playing")
       return callback?.({ error: "This flight has already departed." });
