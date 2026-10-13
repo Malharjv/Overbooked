@@ -1,16 +1,59 @@
-import { useEffect, useMemo, useState } from "react";
-import { io } from "socket.io-client";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { CSSProperties } from "react";
 import GameScene from "./GameScene";
+import { createGameClient } from "./gameSocket";
 import ItemIcon from "./ItemIcon";
-import { FLIGHT_MAP_LIST, FLIGHT_MAPS } from "./maps";
-import type { MapId, RoomState } from "./types";
+import { getFlightAudio, readSoundEnabled, writeSoundEnabled } from "./flightAudio";
+import { FLIGHT_MAP_LIST, FLIGHT_MAPS, STAR_THRESHOLDS, starsFor } from "./maps";
+import type { Leaderboard, MapId, RoomState } from "./types";
+import {
+  getStormBoltState,
+  getStormLightningGameTime,
+  getStormScreenOpacity,
+  getStormStrikeIndex,
+  seededRandom,
+  STORM_PULSE_COUNT,
+} from "./stormLightning";
 
-const socket = io();
+const socket = createGameClient();
+
+type AppScreen = "home" | "lobby" | "game";
+
+const screenOf = (room: RoomState | null): AppScreen => {
+  if (!room) return "home";
+  return room.status === "lobby" ? "lobby" : "game";
+};
 
 const sanitizeFlightCode = (raw: string) =>
   raw.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
 
 const isValidFlightCode = (code: string) => /^[A-Z]{4}$/.test(code);
+
+function SoundMark({ on }: { on: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="currentColor" d="M3 9.5v5h3.2L12 19.2V4.8L6.2 9.5H3z" />
+      {on ? (
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          d="M15.2 9.2a4 4 0 0 1 0 5.6M17.6 6.8a7 7 0 0 1 0 10.4"
+        />
+      ) : (
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          d="M16 9.5 21 14.5M21 9.5 16 14.5"
+        />
+      )}
+    </svg>
+  );
+}
 
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
@@ -30,7 +73,7 @@ function Rules({ compact = false }: { compact?: boolean }) {
     <section className={`rules ${compact ? "compact" : ""}`}>
       <h2>Cabin crew briefing</h2>
       <div className="rule-grid">
-        <div><b>1</b><span>Load up to three drinks, snacks, meals, or trash on your tray.</span></div>
+        <div><b>1</b><span>Carry up to 3 items, but only one meal — meat, fish, or veg.</span></div>
         <div><b>2</b><span>Match every item in a passenger’s order before time runs out.</span></div>
         <div><b>3</b><span>Select aisle or window to collect their trash, then take it to the front bin.</span></div>
         <div><b>!</b><span>Wrong or duplicate items cost 50 points. Don’t block the aisle!</span></div>
@@ -40,6 +83,8 @@ function Rules({ compact = false }: { compact?: boolean }) {
           MOVE <kbd>WASD</kbd> / <kbd>ARROWS</kbd>
           <span>•</span>
           PICK UP &amp; SERVE <kbd>E</kbd> / <kbd>SPACE</kbd>
+          <span>•</span>
+          RETURN ITEM <kbd>B</kbd>
         </p>
       )}
     </section>
@@ -142,19 +187,33 @@ function Home({
 function Lobby({
   room,
   playerId,
+  leaderboard,
   onStart,
   onSelectMap,
+  onCrewName,
 }: {
   room: RoomState;
   playerId: string;
+  leaderboard: Leaderboard;
   onStart: () => void;
   onSelectMap: (mapId: MapId) => void;
+  onCrewName: (crewName: string) => void;
 }) {
   const flightCode = sanitizeFlightCode(room.code);
   const selectedMap = FLIGHT_MAPS[room.mapId];
+  const standings = leaderboard[room.mapId] ?? [];
   const isHost = playerId === room.hostId;
   const shareUrl = `${location.origin}${location.pathname}?flight=${flightCode}`;
   const [copied, setCopied] = useState(false);
+  const [crewDraft, setCrewDraft] = useState(room.crewName);
+  const crewFocused = useRef(false);
+  const needsCrewName = room.players.length > 1;
+  const crewReady = !needsCrewName || (isHost ? crewDraft : room.crewName).trim().length > 0;
+  const you = room.players.find((player) => player.id === playerId);
+  const listedName = needsCrewName ? (isHost ? crewDraft : room.crewName) : (you?.name ?? "");
+  useEffect(() => {
+    if (!crewFocused.current) setCrewDraft(room.crewName);
+  }, [room.crewName]);
   const copy = async () => {
     await navigator.clipboard.writeText(shareUrl);
     setCopied(true);
@@ -163,6 +222,7 @@ function Lobby({
 
   return (
     <main className="lobby-page">
+      <div className="lobby-layout">
       <div className="lobby-stack">
       <section className="lobby-card">
         <Logo compact />
@@ -214,6 +274,28 @@ function Lobby({
           </div>
           <p className="map-description">{selectedMap.description}</p>
         </section>
+        {needsCrewName && (
+          <label className="field crew-name">
+            <span>CREW NAME</span>
+            <input
+              value={isHost ? crewDraft : room.crewName}
+              maxLength={18}
+              placeholder="Name your crew"
+              disabled={!isHost}
+              onFocus={() => {
+                crewFocused.current = true;
+              }}
+              onBlur={() => {
+                crewFocused.current = false;
+                setCrewDraft(room.crewName);
+              }}
+              onChange={(event) => {
+                setCrewDraft(event.target.value);
+                onCrewName(event.target.value);
+              }}
+            />
+          </label>
+        )}
         <div className="crew-list">
           <h2>Crew manifest <span>{room.players.length}/4</span></h2>
           {room.players.map((player) => (
@@ -229,7 +311,7 @@ function Lobby({
           ))}
         </div>
         {isHost ? (
-          <button className="primary depart" onClick={onStart}>
+          <button className="primary depart" onClick={onStart} disabled={!crewReady}>
             DEPART: {selectedMap.shortName}
           </button>
         ) : (
@@ -238,6 +320,38 @@ function Lobby({
       </section>
       <Rules compact />
       </div>
+      <aside className="leaderboard" aria-label={`${selectedMap.name} leaderboard`}>
+        <p className="eyebrow">GLOBAL LEADERBOARD</p>
+        <h2>
+          <span>{selectedMap.icon}</span>
+          {selectedMap.shortName}
+        </h2>
+        {standings.length ? (
+          <ol>
+            {standings.map((entry, index) => {
+              const stars = starsFor(room.mapId, entry.score);
+              return (
+                <li
+                  key={`${entry.crewName}-${index}`}
+                  className={entry.crewName.toLowerCase() === listedName.trim().toLowerCase() ? "yours" : ""}
+                >
+                  <b>{index + 1}</b>
+                  <strong>{entry.crewName}</strong>
+                  <span className="leaderboard-stars" aria-label={`${stars} of 3 stars`}>
+                    {[0, 1, 2].map((star) => (
+                      <i key={star} className={star < stars ? "earned" : ""}>★</i>
+                    ))}
+                  </span>
+                  <span className="leaderboard-score">{entry.score.toLocaleString()}</span>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <p className="leaderboard-empty">No crews have landed this route yet.</p>
+        )}
+      </aside>
+      </div>
     </main>
   );
 }
@@ -245,12 +359,14 @@ function Lobby({
 function TouchControls({
   setVector,
   interact,
+  dropItem,
   seatPreference,
   setSeatPreference,
   setSqueezing,
 }: {
   setVector: (vector: { x: number; z: number }) => void;
   interact: () => void;
+  dropItem: () => void;
   seatPreference: "aisle" | "window";
   setSeatPreference: (value: "aisle" | "window") => void;
   setSqueezing: (value: boolean) => void;
@@ -295,10 +411,126 @@ function TouchControls({
           >
             F<span>HOLD TO SQUEEZE</span>
           </button>
+          <button className="drop-button" onPointerDown={dropItem}>B<span>RETURN</span></button>
           <button className="action-button" onPointerDown={interact}>E<span>ACTION</span></button>
         </div>
       </div>
     </div>
+  );
+}
+
+function StormLightningOverlay() {
+  const whiteoutRef = useRef<HTMLDivElement>(null);
+  const flashRef = useRef<HTMLDivElement>(null);
+  const boltRef = useRef<HTMLDivElement>(null);
+  const lastPulseKey = useRef("");
+
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      const time = getStormLightningGameTime();
+      const opacity = getStormScreenOpacity(time);
+      const { pulse, opacity: boltOpacity } = getStormBoltState(time);
+      const strikeIndex = getStormStrikeIndex(time);
+
+      if (whiteoutRef.current) whiteoutRef.current.style.opacity = String(opacity);
+      if (flashRef.current) {
+        flashRef.current.style.opacity = String(Math.min(0.75, boltOpacity * 0.85));
+      }
+      if (boltRef.current) {
+        if (strikeIndex >= 0 && pulse >= 0) {
+          // Each build-up strobe is a different bolt somewhere else in the sky.
+          const key = `${strikeIndex}-${pulse}`;
+          if (key !== lastPulseKey.current) {
+            lastPulseKey.current = key;
+            const rng = seededRandom(strikeIndex * 11 + pulse * 7 + 5);
+            const isFinal = pulse === STORM_PULSE_COUNT - 1;
+            const left = `${8 + rng() * 76}%`;
+            const skew = -24 + rng() * 48;
+            const scale = (isFinal ? 1.35 : 0.7) + rng() * 0.45;
+            boltRef.current.style.left = left;
+            boltRef.current.style.transform = `translateX(-50%) skewX(${skew}deg) scale(${scale})`;
+            if (flashRef.current) {
+              flashRef.current.style.background = `radial-gradient(circle at ${left} 12%, rgba(255,255,255,.98), rgba(255,255,255,0) 46%)`;
+            }
+          }
+          boltRef.current.style.opacity = String(boltOpacity);
+        } else {
+          boltRef.current.style.opacity = "0";
+        }
+      }
+
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  return (
+    <div className="storm-lightning" aria-hidden="true">
+      <div className="storm-lightning-flash" ref={flashRef} />
+      <div className="storm-lightning-bolt" ref={boltRef} />
+      <div className="storm-whiteout" ref={whiteoutRef} />
+    </div>
+  );
+}
+
+const RAIN_DROPS = Array.from({ length: 340 }, (_, index) => ({
+  x: (index * 47) % 101,
+  delay: -((index * 0.137) % 1.7),
+  duration: 0.46 + ((index * 17) % 38) / 100,
+  length: 30 + ((index * 29) % 70),
+  opacity: 0.32 + ((index * 11) % 52) / 100,
+  drift: 14 + ((index * 7) % 26),
+  depth: index % 4,
+}));
+
+function WeatherScreen({ mapId }: { mapId: MapId }) {
+  if (mapId === "smooth-skies") return null;
+
+  return (
+    <>
+      <div className={`weather-screen weather-${mapId}`} aria-hidden="true">
+      {mapId === "stormy-service" && (
+        <div className="rain-field">
+          {RAIN_DROPS.map((drop, index) => (
+            <i
+              key={index}
+              className={`rain-drop depth-${drop.depth}`}
+              style={
+                {
+                  "--rain-x": `${drop.x}%`,
+                  "--rain-delay": `${drop.delay}s`,
+                  "--rain-duration": `${drop.duration}s`,
+                  "--rain-length": `${drop.length}px`,
+                  "--rain-opacity": drop.opacity,
+                  "--rain-drift": `${drop.drift}px`,
+                } as CSSProperties
+              }
+            />
+          ))}
+        </div>
+      )}
+      {mapId === "turbulent-torrent" && (
+        <div className="wind-atmosphere">
+          <i />
+          <i />
+          <i />
+        </div>
+      )}
+      {(mapId === "turbulent-torrent" || mapId === "stormy-service") && (
+        <div className={`turbulence-alert ${mapId === "stormy-service" ? "severe-alert" : ""}`}>
+          <span>!</span>
+          <div>
+            <b>{mapId === "stormy-service" ? "SEVERE TURBULENCE" : "TURBULENCE"}</b>
+            <small>FASTEN SEATBELTS</small>
+          </div>
+        </div>
+      )}
+      <div className="weather-vignette" />
+      </div>
+      {mapId === "stormy-service" && <StormLightningOverlay />}
+    </>
   );
 }
 
@@ -311,7 +543,8 @@ function Finished({
   canRestart: boolean;
   restart: () => void;
 }) {
-  const stars = room.score >= 1800 ? 3 : room.score >= 1100 ? 2 : room.score >= 500 ? 1 : 0;
+  const stars = starsFor(room.mapId, room.score);
+  const thresholds = STAR_THRESHOLDS[room.mapId];
   return (
     <div className="result-overlay">
       <section className="result-card">
@@ -321,7 +554,9 @@ function Finished({
           {[0, 1, 2].map((index) => <span className={index < stars ? "earned" : ""} key={index}>★</span>)}
         </div>
         <p className="final-score">{room.score.toLocaleString()} <small>POINTS</small></p>
-        <div className="thresholds"><span>★ 500</span><span>★ 1,100</span><span>★ 1,800</span></div>
+        <div className="thresholds">
+          {thresholds.map((points) => <span key={points}>★ {points.toLocaleString()}</span>)}
+        </div>
         {canRestart ? (
           <button className="primary" onClick={restart}>FLY AGAIN</button>
         ) : (
@@ -339,19 +574,97 @@ export default function App() {
   const [mobileVector, setMobileVector] = useState({ x: 0, z: 0 });
   const [mobileSqueezing, setMobileSqueezing] = useState(false);
   const [seatPreference, setSeatPreference] = useState<"aisle" | "window">("aisle");
+  const [leaderboard, setLeaderboard] = useState<Leaderboard>({
+    "smooth-skies": [],
+    "turbulent-torrent": [],
+    "stormy-service": [],
+  });
+  const [soundOn, setSoundOn] = useState(readSoundEnabled);
+  const toggleSound = () => {
+    setSoundOn((on) => {
+      const next = !on;
+      writeSoundEnabled(next);
+      if (next) getFlightAudio().unlock();
+      return next;
+    });
+  };
+  const roomRef = useRef(room);
+  roomRef.current = room;
+  const screen = screenOf(room);
+
+  const requestLobby = () => {
+    socket.emit("return-to-lobby", (response?: { error?: string }) => {
+      if (!response?.error) return;
+      setRoom(null);
+      setPlayerId("");
+      setError(response.error);
+    });
+  };
 
   useEffect(() => {
-    const update = (nextRoom: RoomState) => setRoom(nextRoom);
-    const disconnected = () => setError("Connection lost — trying to reconnect…");
+    if (screen === "home") return;
+    if (history.state?.overbooked !== screen) {
+      history.pushState({ overbooked: screen }, "");
+    }
+    const onPop = () => {
+      const here = screenOf(roomRef.current);
+      if (here === "home") return;
+      history.pushState({ overbooked: here }, "");
+      if (here === "game") {
+        socket.emit("return-to-lobby", (response?: { error?: string }) => {
+          if (!response?.error) return;
+          setRoom(null);
+          setPlayerId("");
+          setError(response.error);
+        });
+        return;
+      }
+      socket.emit("leave-room");
+      setRoom(null);
+      setPlayerId("");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [screen]);
+
+  useEffect(() => {
+    const update = (nextRoom: RoomState | null) => setRoom(nextRoom);
+    const disconnected = () => {
+      setRoom(null);
+      setPlayerId("");
+      setError("Connection lost. Create or join the flight again.");
+    };
+    const connected = () => setError("");
     socket.on("state", update);
+    socket.on("leaderboard", setLeaderboard);
     socket.on("disconnect", disconnected);
-    socket.on("connect", () => setError(""));
+    socket.on("connect", connected);
     return () => {
       socket.off("state", update);
+      socket.off("leaderboard", setLeaderboard);
       socket.off("disconnect", disconnected);
-      socket.off("connect");
+      socket.off("connect", connected);
     };
   }, []);
+
+  useEffect(() => {
+    const unlock = () => {
+      if (readSoundEnabled()) getFlightAudio().unlock();
+    };
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
+  const ambienceMap = room && room.status !== "lobby" && soundOn ? room.mapId : null;
+  useEffect(() => {
+    const audio = getFlightAudio();
+    if (ambienceMap) audio.play(ambienceMap);
+    else audio.stop();
+  }, [ambienceMap]);
 
   useEffect(() => {
     const switchSeat = (event: KeyboardEvent) => {
@@ -363,9 +676,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", switchSeat);
   }, []);
 
-  const callback = (response: { code?: string; playerId?: string; error?: string }) => {
-    if (response.error) return setError(response.error);
-    setPlayerId(response.playerId || "");
+  const callback = (response?: { playerId?: string; error?: string }) => {
+    if (response?.error) return setError(response.error);
+    setPlayerId(response?.playerId || "");
     setError("");
   };
   const time = useMemo(() => {
@@ -390,8 +703,13 @@ export default function App() {
         <Lobby
           room={room}
           playerId={playerId}
-          onStart={() => socket.emit("start-game")}
+          leaderboard={leaderboard}
+          onStart={() => {
+            if (soundOn) getFlightAudio().unlock();
+            socket.emit("start-game");
+          }}
           onSelectMap={(mapId) => socket.emit("set-map", { mapId })}
+          onCrewName={(crewName) => socket.emit("set-crew-name", { crewName })}
         />
         {error && <div className="toast">{error}</div>}
       </>
@@ -408,18 +726,49 @@ export default function App() {
         mobileSqueezing={mobileSqueezing}
         seatPreference={seatPreference}
       />
+      <WeatherScreen mapId={room.mapId} />
+      {createPortal(
+        <>
+          <div className="game-top-left">
+            <button
+              type="button"
+              className={`game-back ${(room.lobbyReturnIds ?? []).includes(playerId) ? "ready" : ""}`}
+              onClick={requestLobby}
+            >
+              {(room.lobbyReturnIds ?? []).includes(playerId) ? "READY" : "← LOBBY"}
+              {room.players.length > 1 && (
+                <small>{(room.lobbyReturnIds ?? []).length}/{room.players.length} CREW</small>
+              )}
+            </button>
+            <div className={`map-hud map-${room.mapId}`}>
+              <span>{FLIGHT_MAPS[room.mapId].icon}</span>
+              <div>
+                <small>ROUTE</small>
+                <strong>{FLIGHT_MAPS[room.mapId].shortName}</strong>
+              </div>
+            </div>
+            <button
+              type="button"
+              className={`sound-toggle ${soundOn ? "on" : "off"}`}
+              onClick={toggleSound}
+              aria-pressed={soundOn}
+              aria-label={soundOn ? "Sound on" : "Sound off"}
+            >
+              <SoundMark on={soundOn} />
+              {soundOn ? "ON" : "OFF"}
+            </button>
+          </div>
+          {room.players.length > 1 && (room.lobbyReturnIds ?? []).length > 0 && (room.lobbyReturnIds ?? []).length < room.players.length && (
+            <div className="lobby-wait">Waiting for the whole crew to return to the lobby</div>
+          )}
+        </>,
+        document.body,
+      )}
       <header className="game-hud">
         <div className="hud-panel score"><small>SERVICE SCORE</small><strong>{room.score.toLocaleString()}</strong></div>
         <div className={`hud-panel timer ${room.timeLeft <= 30 ? "urgent" : ""}`}><small>TIME LEFT</small><strong>{time}</strong></div>
         <div className="hud-panel orders"><small>OPEN ORDERS</small><strong>{room.orders.length}</strong></div>
       </header>
-      <div className={`map-hud map-${room.mapId}`}>
-        <span>{FLIGHT_MAPS[room.mapId].icon}</span>
-        <div>
-          <small>ROUTE</small>
-          <strong>{FLIGHT_MAPS[room.mapId].shortName}</strong>
-        </div>
-      </div>
       <aside className="mini-manifest">
         {room.orders.slice(0, 5).map((order) => (
           <div
@@ -454,13 +803,14 @@ export default function App() {
         </div>
         <em>Press R to switch</em>
       </div>
-      <div className="desktop-tip">MOVE: WASD / ARROWS · ACTION: E / SPACE · HOLD F TO SQUEEZE PAST CREW</div>
+      <div className="desktop-tip">MOVE: WASD / ARROWS · ACTION: E / SPACE · B RETURNS AN ITEM TO ITS STATION · HOLD F TO SQUEEZE PAST CREW</div>
       <TouchControls
         setVector={setMobileVector}
         seatPreference={seatPreference}
         setSeatPreference={setSeatPreference}
         setSqueezing={setMobileSqueezing}
         interact={() => socket.emit("interact", { seatPreference })}
+        dropItem={() => socket.emit("drop")}
       />
       {room.status === "finished" && (
         <Finished

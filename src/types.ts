@@ -34,14 +34,23 @@ export interface Mess {
   z: number;
 }
 
+export interface LeaderboardEntry {
+  crewName: string;
+  score: number;
+}
+
+export type Leaderboard = Record<MapId, LeaderboardEntry[]>;
+
 export interface RoomState {
   code: string;
   hostId: string;
   mapId: MapId;
+  crewName: string;
   status: "lobby" | "playing" | "finished";
   score: number;
   timeLeft: number;
   players: Player[];
   orders: Order[];
   messes: Mess[];
+  lobbyReturnIds: string[];
 }

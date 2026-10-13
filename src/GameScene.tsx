@@ -1,13 +1,31 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Html, RoundedBox } from "@react-three/drei";
-import { useEffect, useMemo, useRef } from "react";
-import { Shape, Vector3 } from "three";
-import type { Group, Mesh, OrthographicCamera, PointLight } from "three";
-import type { Socket } from "socket.io-client";
+import { Environment, Html, Line, RoundedBox } from "@react-three/drei";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type RefObject,
+} from "react";
+import { Raycaster, Shape, Vector2, Vector3 } from "three";
+import type { Camera, Group, Material, Mesh, OrthographicCamera, PointLight } from "three";
 import type { ItemName, Order, Player, RoomState } from "./types";
+import type { GameClient } from "./gameSocket";
 import ItemIcon from "./ItemIcon";
-import { FLIGHT_MAPS } from "./maps";
+import { FLIGHT_MAPS, turbulenceEnvelope } from "./maps";
 import type { FlightMap } from "./maps";
+import {
+  buildBoltPoints,
+  getStormBoltState,
+  getStormSceneLightIntensity,
+  getStormStrikeIndex,
+  isStormFlashHidingLabels,
+  setStormLightningGameTime,
+  stormBoltLayouts,
+} from "./stormLightning";
 
 const ITEM_META: Record<ItemName | "trash", { label: string; color: string }> = {
   water: { label: "WATER", color: "#55c6ff" },
@@ -18,6 +36,77 @@ const ITEM_META: Record<ItemName | "trash", { label: string; color: string }> = 
   veg: { label: "VEG", color: "#65c96f" },
   trash: { label: "TRASH", color: "#adb6c8" },
 };
+
+type LabelOcclusion = {
+  clouds: RefObject<Group | null>;
+  lightning: boolean;
+};
+
+const LabelOcclusionContext = createContext<LabelOcclusion | null>(null);
+
+const labelWorld = new Vector3();
+const labelNdc = new Vector3();
+const labelRaycaster = new Raycaster();
+const sampleNdc = new Vector2();
+// Sample the label centre plus a small halo so a cloud edge creeping over the
+// badge hides it instead of leaving it floating on top of the cloud.
+const LABEL_SAMPLES: Array<[number, number]> = [
+  [0, 0],
+  [-0.035, 0],
+  [0.035, 0],
+  [0, -0.045],
+  [0, 0.045],
+];
+
+function isLabelBehindCloud(anchor: Group, clouds: Group, camera: Camera) {
+  if (!clouds.children.length) return false;
+  anchor.getWorldPosition(labelWorld);
+  labelNdc.copy(labelWorld).project(camera);
+  if (labelNdc.z > 1) return false;
+
+  for (const [dx, dy] of LABEL_SAMPLES) {
+    sampleNdc.set(labelNdc.x + dx, labelNdc.y + dy);
+    labelRaycaster.setFromCamera(sampleNdc, camera);
+    const hits = labelRaycaster.intersectObjects(clouds.children, true);
+    if (!hits.length) continue;
+    const labelDistance = labelRaycaster.ray.origin.distanceTo(labelWorld);
+    if (hits[0].distance < labelDistance) return true;
+  }
+  return false;
+}
+
+function OccludedHtml({
+  position,
+  children,
+  ...props
+}: ComponentProps<typeof Html> & { position?: [number, number, number] }) {
+  const occlusion = useContext(LabelOcclusionContext);
+  const camera = useThree((state) => state.camera);
+  const anchorRef = useRef<Group>(null);
+  const [hidden, setHidden] = useState(false);
+
+  useFrame((state) => {
+    if (!anchorRef.current || !occlusion) return;
+    const flashHidden =
+      occlusion.lightning && isStormFlashHidingLabels(state.clock.elapsedTime);
+    const cloudHidden =
+      !flashHidden &&
+      !!occlusion.clouds.current &&
+      isLabelBehindCloud(anchorRef.current, occlusion.clouds.current, camera);
+    const next = flashHidden || cloudHidden;
+    setHidden((previous) => (previous === next ? previous : next));
+  });
+
+  return (
+    <group ref={anchorRef} position={position ?? [0, 0, 0]}>
+      {!hidden && (
+        <Html {...props} position={[0, 0, 0]}>
+          {children}
+        </Html>
+      )}
+    </group>
+  );
+}
 
 const seatPosition = (seatId: number): [number, number, number] => {
   const row = Math.floor(seatId / 4);
@@ -52,40 +141,168 @@ function CameraRig({ player }: { player?: Player }) {
   return null;
 }
 
-function WeatherLayer({ map }: { map: FlightMap }) {
-  const weather = useRef<Group>(null);
+function SceneLightning({ map }: { map: FlightMap }) {
+  const boltsRef = useRef<Group>(null);
+  const lastStrikeIndex = useRef(-1);
+  const [strikeIndex, setStrikeIndex] = useState(0);
+
+  const boltPaths = useMemo(() => {
+    if (map.id !== "stormy-service" || strikeIndex < 0) return [];
+    return stormBoltLayouts(strikeIndex).map((layout) => ({
+      main: buildBoltPoints(layout, strikeIndex),
+      layout,
+    }));
+  }, [map.id, strikeIndex]);
+
+  useFrame((state) => {
+    if (map.id !== "stormy-service") return;
+    const index = getStormStrikeIndex(state.clock.elapsedTime);
+    if (index >= 0 && index !== lastStrikeIndex.current) {
+      lastStrikeIndex.current = index;
+      setStrikeIndex(index);
+    }
+    const { pulse, opacity } = getStormBoltState(state.clock.elapsedTime);
+    if (boltsRef.current) {
+      boltsRef.current.visible = opacity > 0.02;
+      boltsRef.current.children.forEach((bolt, boltIndex) => {
+        bolt.visible = boltIndex === pulse;
+        if (!bolt.visible) return;
+        bolt.traverse((object) => {
+          if (!("material" in object)) return;
+          const material = object.material as Material | Material[];
+          const materials = Array.isArray(material) ? material : [material];
+          materials.forEach((entry) => {
+            entry.transparent = true;
+            entry.opacity = opacity;
+            entry.depthWrite = false;
+          });
+        });
+      });
+    }
+  });
+
+  if (map.id !== "stormy-service") return null;
+
+  return (
+    <group ref={boltsRef} visible={false}>
+      {boltPaths.map(({ main, layout }, boltIndex) => (
+        <group key={`${strikeIndex}-${boltIndex}`} scale={layout.scale}>
+          <Line points={main} color="#f4fbff" lineWidth={2.8} transparent opacity={1} depthWrite={false} />
+          {main.slice(2, 5).map((point, branchIndex) => {
+            const branchEnd: [number, number, number] = [
+              point[0] + (branchIndex - 1) * 0.85,
+              point[1] - 0.62,
+              point[2] + 0.42,
+            ];
+            return (
+              <Line
+                key={branchIndex}
+                points={[point, branchEnd]}
+                color="#dfefff"
+                lineWidth={1.5}
+                transparent
+                opacity={0.85}
+                depthWrite={false}
+              />
+            );
+          })}
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function CloudFormation({
+  color,
+  position,
+  scale,
+  dark = false,
+}: {
+  color: string;
+  position: [number, number, number];
+  scale: number;
+  dark?: boolean;
+}) {
+  const lobes = [
+    [-1.55, 0, 0.05, 1.2],
+    [-0.85, 0.35, 0, 1.35],
+    [0, 0.48, 0, 1.55],
+    [0.92, 0.3, 0.05, 1.28],
+    [1.58, -0.02, 0, 1.05],
+    [-0.55, -0.15, 0.62, 1.22],
+    [0.5, -0.12, 0.66, 1.3],
+    [0.05, 0.05, -0.62, 1.18],
+  ] as const;
+
+  return (
+    <group position={position} scale={scale} userData={{ cloud: true }}>
+      <mesh scale={[2.6, 0.62, 1.15]} castShadow={dark}>
+        <sphereGeometry args={[1, 24, 16]} />
+        <meshStandardMaterial color={color} roughness={1} />
+      </mesh>
+      {lobes.map(([x, y, z, radius], index) => (
+        <mesh key={index} position={[x, y, z]} scale={[radius, radius * 0.78, radius * 0.9]} castShadow={dark}>
+          <sphereGeometry args={[1, 20, 14]} />
+          <meshStandardMaterial
+            color={index < 3 && dark ? "#647087" : color}
+            roughness={1}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function WeatherLayer({
+  map,
+  cloudsRef,
+}: {
+  map: FlightMap;
+  cloudsRef: RefObject<Group | null>;
+}) {
+  const clouds = cloudsRef;
+  const wind = useRef<Group>(null);
   const lightning = useRef<PointLight>(null);
-  const cloudColor = map.id === "smooth-skies" ? "#ffffff" : map.id === "turbulent-torrent" ? "#b7c8cd" : "#536078";
-  const particles = useMemo(
+  const cloudColor =
+    map.id === "smooth-skies"
+      ? "#f8fdff"
+      : map.id === "turbulent-torrent"
+        ? "#aebfc4"
+        : "#48546c";
+  const windStreaks = useMemo(
     () =>
-      Array.from({ length: map.environment.rain ? 72 : 24 }, (_, index) => ({
-        x: ((index * 37) % 29) - 14,
-        y: 2 + ((index * 17) % 12),
-        z: ((index * 23) % 31) - 15,
+      Array.from({ length: 34 }, (_, index) => ({
+        x: ((index * 37) % 31) - 15,
+        y: 1.4 + ((index * 17) % 9) * 0.42,
+        z: ((index * 23) % 33) - 16,
         scale: 0.55 + ((index * 13) % 8) / 10,
       })),
-    [map.environment.rain],
+    [],
   );
 
   useFrame((state, delta) => {
-    if (weather.current) {
-      const speed = 1.2 + map.environment.wind * 7;
-      weather.current.children.forEach((child, index) => {
-        if (!child.userData.weatherParticle) return;
-        child.position.x += delta * speed;
-        child.position.z -= delta * speed * (map.environment.rain ? 1.7 : 0.2);
-        if (child.position.x > 15) child.position.x = -15;
-        if (child.position.z < -16) child.position.z = 16;
-        child.rotation.z = map.environment.rain ? -0.45 : Math.PI / 2;
-        child.userData.phase = (child.userData.phase ?? index) + delta;
+    const time = state.clock.elapsedTime;
+    if (clouds.current) {
+      clouds.current.children.forEach((cloud, index) => {
+        cloud.position.x += delta * (0.16 + map.environment.wind * 0.55);
+        cloud.position.y += Math.sin(time * 0.22 + index * 1.7) * delta * 0.035;
+        if (cloud.position.x > 15) cloud.position.x = -15;
+      });
+      // Labels raycast against these meshes this same frame, so make sure the
+      // world matrices already reflect the new positions.
+      clouds.current.updateMatrixWorld(true);
+    }
+    if (wind.current) {
+      wind.current.children.forEach((streak) => {
+        streak.position.x += delta * (4.5 + map.environment.wind * 7);
+        if (streak.position.x > 16) streak.position.x = -16;
       });
     }
+    setStormLightningGameTime(time);
     if (lightning.current) {
-      const pulse =
-        map.environment.lightning &&
-        (Math.sin(state.clock.elapsedTime * 0.72) > 0.985 ||
-          Math.sin(state.clock.elapsedTime * 1.93) > 0.997);
-      lightning.current.intensity = pulse ? 18 : 0;
+      lightning.current.intensity = map.environment.lightning
+        ? getStormSceneLightIntensity(time)
+        : 0;
     }
   });
 
@@ -95,50 +312,46 @@ function WeatherLayer({ map }: { map: FlightMap }) {
         <planeGeometry args={[80, 80]} />
         <meshBasicMaterial color={map.palette.horizon} />
       </mesh>
-      {[
-        [-10, 0.2, -9],
-        [10, -0.2, -6],
-        [-9, 0.8, 8],
-        [11, 1.2, 9],
-      ].map(([x, y, z], cloudIndex) => (
-        <group key={cloudIndex} position={[x, y, z]} scale={map.id === "smooth-skies" ? 1 : 1.45}>
-          {[
-            [-0.8, 0, 0],
-            [0, 0.28, 0],
-            [0.9, 0, 0],
-            [0.2, -0.1, 0.45],
-          ].map(([cx, cy, cz], index) => (
-            <mesh key={index} position={[cx, cy, cz]}>
-              <sphereGeometry args={[1.15 - index * 0.08, 14, 10]} />
-              <meshStandardMaterial
-                color={cloudColor}
-                transparent
-                opacity={map.id === "stormy-service" ? 0.82 : 0.68}
-                roughness={1}
-              />
+      <group ref={clouds}>
+        {[
+          [-11, 5.8, -9, 1.15],
+          [10.5, 6.4, -6, 1.3],
+          [-10, 5.5, 8, 1.05],
+          [11.5, 6.8, 9, 1.2],
+          ...(map.id === "stormy-service"
+            ? [
+                [-5, 7.4, -12, 1.65],
+                [6, 7.8, 12, 1.75],
+              ]
+            : []),
+        ].map(([x, y, z, scale], index) => (
+          <CloudFormation
+            key={index}
+            color={cloudColor}
+            position={[x, y, z]}
+            scale={scale}
+            dark={map.id === "stormy-service"}
+          />
+        ))}
+      </group>
+      {map.id === "turbulent-torrent" && (
+        <group ref={wind}>
+          {windStreaks.map((streak, index) => (
+            <mesh key={index} position={[streak.x, streak.y, streak.z]} scale={streak.scale}>
+              <boxGeometry args={[1.55, 0.025, 0.025]} />
+              <meshBasicMaterial color="#edf8f6" transparent opacity={0.3} />
             </mesh>
           ))}
         </group>
-      ))}
-      <group ref={weather}>
-        {map.environment.wind > 0.3 &&
-          particles.map((particle, index) => (
-            <mesh
-              key={index}
-              position={[particle.x, particle.y, particle.z]}
-              scale={particle.scale}
-              userData={{ weatherParticle: true }}
-            >
-              <boxGeometry args={map.environment.rain ? [0.025, 0.025, 0.85] : [1.15, 0.025, 0.025]} />
-              <meshBasicMaterial
-                color={map.environment.rain ? "#b9d8ff" : "#e5f5f5"}
-                transparent
-                opacity={map.environment.rain ? 0.7 : 0.34}
-              />
-            </mesh>
-          ))}
-      </group>
-      <pointLight ref={lightning} position={[-5, 12, -4]} color="#dce7ff" intensity={0} distance={40} />
+      )}
+      <SceneLightning map={map} />
+      <pointLight
+        ref={lightning}
+        position={[-5, 12, -4]}
+        color="#e8efff"
+        intensity={0}
+        distance={45}
+      />
     </group>
   );
 }
@@ -235,7 +448,7 @@ function CrewMember({
 }: {
   player: Player;
   isLocal: boolean;
-  socket: Socket;
+  socket: GameClient;
   mobileVector: { x: number; z: number };
   mobileSqueezing: boolean;
   seatPreference: "aisle" | "window";
@@ -266,6 +479,10 @@ function CrewMember({
       if (event.key === " " || event.key.toLowerCase() === "e") {
         event.preventDefault();
         socket.emit("interact", { seatPreference });
+      }
+      if (event.key.toLowerCase() === "b" && !event.repeat) {
+        event.preventDefault();
+        socket.emit("drop");
       }
     };
     const up = (event: KeyboardEvent) => {
@@ -492,7 +709,7 @@ function CrewMember({
                 <ItemModel item={heldItem.item} scale={0.95} />
               </group>
             ))}
-            <Html center position={[0, 0.78, 0]}>
+            <OccludedHtml center position={[0, 0.78, 0]}>
               <div className="held-item">
                 <b>TRAY {player.held.length}/3</b>
                 <div className="held-items-icons">
@@ -501,15 +718,15 @@ function CrewMember({
                   ))}
                 </div>
               </div>
-            </Html>
+            </OccludedHtml>
           </group>
         )}
       </group>
-      <Html center position={[0, 1.9, 0]}>
+      <OccludedHtml center position={[0, 1.9, 0]}>
         <div className={`name-tag ${isLocal ? "local" : ""}`}>
           {isLocal ? "YOU" : player.name}
         </div>
-      </Html>
+      </OccludedHtml>
     </group>
   );
 }
@@ -568,7 +785,7 @@ function PassengerSeat({ seatId, order }: { seatId: number; order?: Order }) {
         <meshBasicMaterial color="#19213a" />
       </mesh>
       {order && remaining && (
-        <Html center position={[0, 1.55, 0]}>
+        <OccludedHtml center position={[0, 1.55, 0]}>
           <div className={`order-bubble ${expiring ? "expiring" : ""}`}>
             <small>{seatId % 4 === 0 || seatId % 4 === 3 ? "WINDOW" : "AISLE"}</small>
             <div>
@@ -585,7 +802,7 @@ function PassengerSeat({ seatId, order }: { seatId: number; order?: Order }) {
               }}
             />
           </div>
-        </Html>
+        </OccludedHtml>
       )}
     </group>
   );
@@ -619,12 +836,12 @@ function Supply({
       <group position={[0, 0.68, 0.04]}>
         <ItemModel item={item} scale={2.05} />
       </group>
-      <Html center position={[0, 1.24, 0]}>
+      <OccludedHtml center position={[0, 1.24, 0]}>
         <div className="supply-label">
           <ItemIcon item={item} size={28} />
           {label}
         </div>
-      </Html>
+      </OccludedHtml>
     </group>
   );
 }
@@ -747,19 +964,40 @@ function Cabin({
 }: {
   room: RoomState;
   playerId: string;
-  socket: Socket;
+  socket: GameClient;
   mobileVector: { x: number; z: number };
   mobileSqueezing: boolean;
   seatPreference: "aisle" | "window";
 }) {
   const map = FLIGHT_MAPS[room.mapId];
+  const cloudsRef = useRef<Group>(null);
+  const labelOcclusion = useMemo<LabelOcclusion>(
+    () => ({ clouds: cloudsRef, lightning: map.environment.lightning }),
+    [map.environment.lightning],
+  );
+  const aircraft = useRef<Group>(null);
   const orderBySeat = useMemo(
     () => new Map(room.orders.map((order) => [order.seatId, order])),
     [room.orders],
   );
 
+  useFrame((state) => {
+    if (!aircraft.current) return;
+    const time = state.clock.elapsedTime;
+    const envelope = turbulenceEnvelope(map.id, time);
+    const shake =
+      (Math.sin(time * 18.7) + Math.sin(time * 29.3) * 0.45 + Math.sin(time * 43.1) * 0.2) *
+      envelope;
+
+    aircraft.current.position.x = shake * 0.13;
+    aircraft.current.position.y = Math.abs(shake) * 0.055;
+    aircraft.current.position.z = Math.sin(time * 24.6) * envelope * 0.065;
+    aircraft.current.rotation.z = shake * 0.022;
+    aircraft.current.rotation.x = Math.sin(time * 21.2) * envelope * 0.011;
+  });
+
   return (
-    <>
+    <LabelOcclusionContext.Provider value={labelOcclusion}>
       <color attach="background" args={[map.palette.sky]} />
       <fog attach="fog" args={[map.palette.fog, 22, 45]} />
       <ambientLight intensity={map.id === "stormy-service" ? 0.85 : 1.8} />
@@ -771,9 +1009,9 @@ function Cabin({
         shadow-mapSize={[2048, 2048]}
       />
       <Environment preset="city" />
-      <WeatherLayer map={map} />
+      <WeatherLayer map={map} cloudsRef={cloudsRef} />
 
-      <group scale={1.08}>
+      <group ref={aircraft} scale={1.08}>
         <AircraftBody accent={map.palette.cabinAccent} />
         {[-3.05, 3.05].map((x) => (
           <group key={x}>
@@ -883,9 +1121,9 @@ function Cabin({
             <circleGeometry args={[0.35, 16]} />
             <meshStandardMaterial color="#101b35" />
           </mesh>
-          <Html center position={[0, 0.98, 0]}>
+          <OccludedHtml center position={[0, 0.98, 0]}>
             <div className="trash-label"><ItemIcon item="trash" size={32} /> TRASH BIN</div>
-          </Html>
+          </OccludedHtml>
         </group>
         {room.messes.map((mess) => (
           <group key={mess.id} position={[mess.x, 0.28, mess.z]}>
@@ -897,12 +1135,12 @@ function Cabin({
               <dodecahedronGeometry args={[0.22, 0]} />
               <meshStandardMaterial color="#596579" />
             </mesh>
-            <Html center position={[0, 0.62, 0]}>
+            <OccludedHtml center position={[0, 0.62, 0]}>
               <div className="mess">
                 <ItemIcon item="trash" size={38} />
                 <b>PICK UP</b>
               </div>
-            </Html>
+            </OccludedHtml>
           </group>
         ))}
         {room.players.map((player) => (
@@ -917,14 +1155,14 @@ function Cabin({
           />
         ))}
       </group>
-    </>
+    </LabelOcclusionContext.Provider>
   );
 }
 
 export default function GameScene(props: {
   room: RoomState;
   playerId: string;
-  socket: Socket;
+  socket: GameClient;
   mobileVector: { x: number; z: number };
   mobileSqueezing: boolean;
   seatPreference: "aisle" | "window";
